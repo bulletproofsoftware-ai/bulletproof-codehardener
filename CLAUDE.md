@@ -124,7 +124,7 @@ Scanners that skip due to missing context return structured `skipReason`/`skipHi
 
 ### Local Docker Stack
 ```bash
-docker compose up -d              # postgres=5435, redis=6381, backend=7002, dashboard=7001, n8n=5680
+docker compose up -d              # postgres=5432, redis=6379, backend=4000, dashboard=3001, n8n=5678
 docker compose build backend      # Rebuild backend
 docker compose build dashboard    # Rebuild dashboard (NEXT_PUBLIC_* must be build args)
 docker compose restart backend    # Restart after rebuild

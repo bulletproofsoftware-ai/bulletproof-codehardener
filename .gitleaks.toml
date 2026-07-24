@@ -19,4 +19,8 @@ regexes = [
   '''env\.N8N_API_KEY''',
   '''X-N8N-API-KEY''',
   '''curl .*(localhost|example\.com|-u |Authorization)''',
+  # AWS's own published documentation placeholder access key id. Used as a fixture
+  # in backend/src/services/scanners/llm-agent.test.ts to assert that the secret
+  # redactor strips AWS keys before source lines reach the LLM. Not a live credential.
+  '''AKIAIOSFODNN7EXAMPLE''',
 ]

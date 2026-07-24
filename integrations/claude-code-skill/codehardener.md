@@ -33,7 +33,7 @@ Or connect to a running backend:
   "mcpServers": {
     "codehardener": {
       "type": "sse",
-      "url": "http://localhost:7002/api/v1/mcp/stream"
+      "url": "http://localhost:4000/api/v1/mcp/stream"
     }
   }
 }

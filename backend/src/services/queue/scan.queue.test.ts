@@ -7,7 +7,7 @@ vi.mock('../../config/env.js', () => ({
     N8N_ENABLED: false,
     N8N_WEBHOOK_BASE: 'http://n8n:5678/webhook',
     N8N_API_KEY: '',
-    PORT: 7002,
+    PORT: 4000,
   },
   redisUrl: 'redis://localhost:6379',
   llmVerifyEnabled: false,

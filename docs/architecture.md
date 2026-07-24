@@ -12,9 +12,9 @@ The platform integrates 62 unique security tools (64 SCANNER_MAP entries includi
 |---------|------|---------------|----------------------|
 | `postgres` | PostgreSQL 16 -- single instance, 3 databases | 5432 | 5432 |
 | `redis` | BullMQ job queue + cache (Redis 7) | 6379 | 6379 |
-| `backend` | Express API server + MCP SSE endpoint | 4000 | 7002 |
+| `backend` | Express API server + MCP SSE endpoint | 4000 | 4000 |
 | `scanner` | BullMQ worker -- executes scan pipeline with 62 tools installed | - | - |
-| `dashboard` | Next.js 14 web UI (App Router) | 3000 | 3003 |
+| `dashboard` | Next.js 14 web UI (App Router) | 3000 | 3001 |
 | `n8n` | Workflow automation (scan orchestration, webhooks) | 5678 | 5678 |
 | `defectdojo` | Vulnerability management UI (optional, profile-gated) | 8080 | 8083 |
 | `init` | One-shot container: runs migrations, imports n8n workflows | - | - |

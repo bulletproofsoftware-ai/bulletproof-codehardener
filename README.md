@@ -2,6 +2,8 @@
 
 Security assurance platform for AI-first developers. Integrates 27 open-source security tools into a single interface that AI coding agents (Claude Code, Cursor, GitHub Copilot) can call through MCP.
 
+> **On the numbers:** 27 integrated open-source tools powering 37 analyzers (22 quality + 15 security). The tool count is the number of distinct upstream projects vendored into the scanner image; the analyzer count is the number of named checks those tools expose through the API and dashboard.
+
 > 📚 Full documentation in [`docs/`](docs/) · 🔒 security scan in [`docs/scan/scan-report.md`](docs/scan/scan-report.md). (System-overview media coming soon.)
 
 ## Quick Start

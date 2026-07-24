@@ -1,5 +1,18 @@
-# Code Hardener - Production Deployment (c2 / scan.codehardener.com)
-# Shares PostgreSQL + n8n with existing claude-memory stack
+# Code Hardener - Production Deployment (external Postgres + n8n)
+#
+# Use this overlay when Postgres and n8n are already running elsewhere in your
+# environment (a managed database, another compose project, or a separate host)
+# and you only want Code Hardener's own services here.
+#
+# Required in .env (no defaults are provided — set them explicitly):
+#   EXTERNAL_POSTGRES_HOST   hostname/IP of your PostgreSQL 16 instance
+#   EXTERNAL_N8N_HOST        hostname/IP of your n8n instance
+#   PUBLIC_BASE_URL          public origin the dashboard is served from
+#   DB_PASSWORD, JWT_SECRET, N8N_API_KEY, INTERNAL_API_KEY
+#
+# If the external services live on another Docker network, attach it yourself:
+#   docker network connect <your-network> codehardener-backend-1
+#
 # Usage: docker compose -f docker-compose.prod.yml up -d
 
 services:
@@ -32,25 +45,25 @@ services:
       NODE_ENV: production
       PORT: 4000
       HOST: 0.0.0.0
-      DB_HOST: ${EXTERNAL_POSTGRES_HOST:-claude_backend_postgres}
-      DB_PORT: 5432
+      DB_HOST: ${EXTERNAL_POSTGRES_HOST:?Set EXTERNAL_POSTGRES_HOST in .env}
+      DB_PORT: ${EXTERNAL_POSTGRES_PORT:-5432}
       DB_NAME: codehardener
       DB_USER: codehardener
       DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
       REDIS_HOST: redis
       REDIS_PORT: 6379
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
-      CORS_ORIGIN: https://scan.codehardener.com
+      CORS_ORIGIN: ${PUBLIC_BASE_URL:?Set PUBLIC_BASE_URL in .env}
       LOG_LEVEL: info
-      N8N_URL: http://${EXTERNAL_N8N_HOST:-claude_backend_n8n}:5678
+      N8N_URL: http://${EXTERNAL_N8N_HOST:?Set EXTERNAL_N8N_HOST in .env}:${EXTERNAL_N8N_PORT:-5678}
       N8N_ENABLED: "true"
-      N8N_WEBHOOK_BASE: http://${EXTERNAL_N8N_HOST:-claude_backend_n8n}:5678/webhook
+      N8N_WEBHOOK_BASE: http://${EXTERNAL_N8N_HOST:?Set EXTERNAL_N8N_HOST in .env}:${EXTERNAL_N8N_PORT:-5678}/webhook
       N8N_API_KEY: ${N8N_API_KEY:?Set N8N_API_KEY in .env}
       INTERNAL_API_KEY: ${INTERNAL_API_KEY:?Set INTERNAL_API_KEY in .env}
       SIGNING_KEYS_DIR: /data/keys
       SCANNER_MAX_CONCURRENT: ${SCANNER_MAX_CONCURRENT:-3}
     ports:
-      - "127.0.0.1:7002:4000"
+      - "127.0.0.1:${BACKEND_PORT:-4000}:4000"
     volumes:
       - signing_keys:/data/keys
     depends_on:
@@ -64,7 +77,6 @@ services:
       start_period: 30s
     networks:
       - codehardener
-      - claude_backend
 
   # ============================================================
   # Scanner Worker - 49 security tools
@@ -76,8 +88,8 @@ services:
     restart: unless-stopped
     environment:
       NODE_ENV: production
-      DB_HOST: ${EXTERNAL_POSTGRES_HOST:-claude_backend_postgres}
-      DB_PORT: 5432
+      DB_HOST: ${EXTERNAL_POSTGRES_HOST:?Set EXTERNAL_POSTGRES_HOST in .env}
+      DB_PORT: ${EXTERNAL_POSTGRES_PORT:-5432}
       DB_NAME: codehardener
       DB_USER: codehardener
       DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
@@ -102,7 +114,6 @@ services:
           memory: 4G
     networks:
       - codehardener
-      - claude_backend
 
   # ============================================================
   # Dashboard - Next.js frontend
@@ -112,7 +123,7 @@ services:
       context: ./dashboard
       dockerfile: Dockerfile
       args:
-        NEXT_PUBLIC_API_URL: https://scan.codehardener.com/api/v1
+        NEXT_PUBLIC_API_URL: ${PUBLIC_BASE_URL:?Set PUBLIC_BASE_URL in .env}/api/v1
         NEXT_PUBLIC_DEV_MODE: "false"
         API_URL: http://backend:4000
     restart: unless-stopped
@@ -120,7 +131,7 @@ services:
       NODE_ENV: production
       API_URL: http://backend:4000
     ports:
-      - "127.0.0.1:7001:3000"
+      - "127.0.0.1:${DASHBOARD_PORT:-3001}:3000"
     depends_on:
       - backend
     healthcheck:
@@ -139,7 +150,8 @@ services:
     image: postgres:16-alpine
     entrypoint: ["/bin/sh", "/app/scripts/init-all.sh"]
     environment:
-      DB_HOST: ${EXTERNAL_POSTGRES_HOST:-claude_backend_postgres}
+      DB_HOST: ${EXTERNAL_POSTGRES_HOST:?Set EXTERNAL_POSTGRES_HOST in .env}
+      DB_PORT: ${EXTERNAL_POSTGRES_PORT:-5432}
       DB_USER: codehardener
       DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
       DB_NAME: codehardener
@@ -149,14 +161,10 @@ services:
     restart: "no"
     networks:
       - codehardener
-      - claude_backend
 
 networks:
   codehardener:
     driver: bridge
-  claude_backend:
-    external: true
-    name: claude-memory_claude_backend
 
 volumes:
   redis_data:

@@ -4,7 +4,7 @@ info:
   version: 2.0.0
   description: Security assurance platform API with 70+ integrated scanners
 servers:
-  - url: http://localhost:7002/api/v1
+  - url: http://localhost:4000/api/v1
     description: Local development
   - url: https://scan.codehardener.com/api/v1
     description: Production

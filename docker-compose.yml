@@ -83,7 +83,7 @@ services:
       LLM_THREATMODEL_MAX_TOKENS: ${LLM_THREATMODEL_MAX_TOKENS:-150000}
       LLM_SCAN_MAX_TOTAL_TOKENS: ${LLM_SCAN_MAX_TOTAL_TOKENS:-2000000}
     ports:
-      - "${BACKEND_PORT:-7002}:4000"
+      - "${BACKEND_PORT:-4000}:4000"
     volumes:
       - signing_keys:/data/keys
       - ${LOCAL_CODE_DIR:-~/Code}:/repos
@@ -267,12 +267,12 @@ services:
       context: ./dashboard
       dockerfile: Dockerfile
       args:
-        NEXT_PUBLIC_API_URL: http://localhost:${BACKEND_PORT:-7002}/api/v1
+        NEXT_PUBLIC_API_URL: http://localhost:${BACKEND_PORT:-4000}/api/v1
         NEXT_PUBLIC_DEV_MODE: "true"
     environment:
       NODE_ENV: production
       API_URL: http://backend:4000
-      NEXT_PUBLIC_API_URL: http://localhost:${BACKEND_PORT:-7002}/api/v1
+      NEXT_PUBLIC_API_URL: http://localhost:${BACKEND_PORT:-4000}/api/v1
     ports:
       - "${DASHBOARD_PORT:-3001}:3000"
     depends_on:

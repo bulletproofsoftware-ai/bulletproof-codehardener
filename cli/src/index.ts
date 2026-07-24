@@ -18,7 +18,7 @@ program
   .description('Run a security scan on the current project')
   .option('-p, --profile <profile>', 'scan profile (quick|standard|comprehensive|auto)', 'auto')
   .option('-s, --scanners <scanners...>', 'specific scanners to run')
-  .option('--url <url>', 'Code Hardener API URL', process.env.CODEHARDENER_URL || 'http://localhost:7002')
+  .option('--url <url>', 'Code Hardener API URL', process.env.CODEHARDENER_URL || 'http://localhost:4000')
   .option('--api-key <key>', 'API key', process.env.CODEHARDENER_API_KEY)
   .option('--wait', 'wait for scan to complete', true)
   .option('--no-wait', 'return immediately after queueing scan')
@@ -28,7 +28,7 @@ program
 program
   .command('status <scanId>')
   .description('Check the status of a scan')
-  .option('--url <url>', 'Code Hardener API URL', process.env.CODEHARDENER_URL || 'http://localhost:7002')
+  .option('--url <url>', 'Code Hardener API URL', process.env.CODEHARDENER_URL || 'http://localhost:4000')
   .option('--api-key <key>', 'API key', process.env.CODEHARDENER_API_KEY)
   .option('--json', 'output as JSON')
   .action(statusCommand);
@@ -38,7 +38,7 @@ program
   .description('Get findings from a completed scan')
   .option('--severity <severity>', 'filter by severity (critical|high|medium|low)')
   .option('--limit <n>', 'max findings to show', '20')
-  .option('--url <url>', 'Code Hardener API URL', process.env.CODEHARDENER_URL || 'http://localhost:7002')
+  .option('--url <url>', 'Code Hardener API URL', process.env.CODEHARDENER_URL || 'http://localhost:4000')
   .option('--api-key <key>', 'API key', process.env.CODEHARDENER_API_KEY)
   .option('--json', 'output as JSON')
   .action(findingsCommand);
@@ -46,7 +46,7 @@ program
 program
   .command('score [projectId]')
   .description('Get security score for a project')
-  .option('--url <url>', 'Code Hardener API URL', process.env.CODEHARDENER_URL || 'http://localhost:7002')
+  .option('--url <url>', 'Code Hardener API URL', process.env.CODEHARDENER_URL || 'http://localhost:4000')
   .option('--api-key <key>', 'API key', process.env.CODEHARDENER_API_KEY)
   .option('--json', 'output as JSON')
   .action(scoreCommand);
