@@ -1,0 +1,16 @@
+{
+  "id": "5ee4a130-87f8-4225-87be-c8189560b5b0",
+  "scanId": "76cff07c-0ba6-4743-a3e4-ca7ffaaf309b",
+  "attestationType": "in-toto",
+  "subjectName": "bulletproof-codehardener",
+  "subjectDigest": "ed15d2db80481b9121201024ac22e27f4343d5c76bf4a2054c9204c91d633926",
+  "predicate": null,
+  "signature": "CnEO34Zcoj2sbhh06QDnm96P6G0W3JzjvnSovz4iuS6Y3D945A1vqenPHPGFaxAdvTdkSfBGzQECSBDnxKpUDQ==",
+  "signatureAlgorithm": "ed25519-local",
+  "certificate": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA4PugH9Oqq7ePeL1XlEnUZv8Ht21BMkHgRveuIUbAPDo=\n-----END PUBLIC KEY-----",
+  "certificateChain": null,
+  "rekorLogId": null,
+  "rekorLogIndex": null,
+  "transparencyLogUrl": null,
+  "createdAt": "2026-07-24 22:35:49.9+00"
+}
