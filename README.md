@@ -6,8 +6,8 @@ Security assurance platform for AI-first developers. Integrates 27 open-source s
 
 ```bash
 # 1. Clone and configure
-git clone https://github.com/your-org/codehardener.git
-cd codehardener
+git clone https://github.com/bulletproofsoftware-ai/bulletproof-codehardener.git
+cd bulletproof-codehardener
 cp .env.example .env
 # Edit .env — at minimum set DB_PASSWORD and JWT_SECRET
 
@@ -191,4 +191,4 @@ Key variables:
 
 ## License
 
-MIT
+Apache-2.0 — see [LICENSE](LICENSE).
