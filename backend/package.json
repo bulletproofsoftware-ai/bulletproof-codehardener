@@ -31,7 +31,7 @@
     "express": "^4.21.0",
     "express-rate-limit": "^7.4.0",
     "express-validator": "^7.2.0",
-    "glob": "^10.5.0",
+    "glob": "^13.0.6",
     "gray-matter": "^4.0.3",
     "helmet": "^7.1.0",
     "ioredis": "^5.4.1",
