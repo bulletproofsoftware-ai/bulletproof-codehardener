@@ -10,12 +10,15 @@
  *   - Auto-cleanup on completion or timeout
  */
 
-import { exec, spawn } from 'child_process';
+import { exec, execFile, spawn } from 'child_process';
 import { promisify } from 'util';
 import crypto from 'crypto';
 import { createLogger } from '../../utils/logger.js';
 
 const execAsync = promisify(exec);
+// execFile variant — runs the binary directly with an argument array (no shell),
+// so container IDs cannot be interpreted as shell metacharacters.
+const execFileAsync = promisify(execFile);
 const logger = createLogger('container-isolation');
 
 export type ScanCategory = 'sast' | 'dast' | 'sca' | 'secrets' | 'iac' | 'load' | 'api' | 'browser' | 'supply-chain' | 'policy';
@@ -313,7 +316,7 @@ export async function runInContainer(config: ContainerConfig): Promise<Container
       killed = true;
       logger.warn({ containerId, timeoutMs }, 'Scanner container timed out, killing');
       // Kill the container directly (more reliable than process.kill)
-      exec(`docker kill ${containerId}`, () => {});
+      execFile('docker', ['kill', containerId], () => {});
       proc.kill('SIGTERM');
     }, timeoutMs);
 
@@ -373,14 +376,15 @@ export async function cleanupScanContainers(): Promise<number> {
     // Kill containers running longer than 10 minutes
     for (const containerId of containers) {
       try {
-        const { stdout: inspectOut } = await execAsync(
-          `docker inspect --format '{{.State.StartedAt}}' ${containerId}`
+        const { stdout: inspectOut } = await execFileAsync(
+          'docker',
+          ['inspect', '--format', '{{.State.StartedAt}}', containerId]
         );
         const startedAt = new Date(inspectOut.trim());
         const runningMs = Date.now() - startedAt.getTime();
 
         if (runningMs > 600_000) { // 10 minutes
-          await execAsync(`docker kill ${containerId}`);
+          await execFileAsync('docker', ['kill', containerId]);
           logger.warn({ containerId, runningMs }, 'Killed stale scan container');
         }
       } catch {

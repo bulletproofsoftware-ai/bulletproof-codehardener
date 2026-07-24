@@ -56,12 +56,19 @@ function findFuzzTarget(): { type: 'makefile' | 'cmake' | 'binary'; path: string
 
 function hasCSource(dir: string): boolean {
   try {
-    const { execSync } = require('child_process');
-    const result = execSync(
-      `find ${dir} -maxdepth 3 \\( -name "*.c" -o -name "*.cpp" -o -name "*.cc" \\) -not -path "*/build/*" -not -path "*/.git/*" 2>/dev/null | head -1`,
-      { encoding: 'utf-8', timeout: 5000 }
+    const { execFileSync } = require('child_process');
+    // execFile with an argument array — no shell interpolation of `dir`.
+    const result = execFileSync(
+      'find',
+      [
+        dir, '-maxdepth', '3',
+        '(', '-name', '*.c', '-o', '-name', '*.cpp', '-o', '-name', '*.cc', ')',
+        '-not', '-path', '*/build/*',
+        '-not', '-path', '*/.git/*',
+      ],
+      { encoding: 'utf-8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] }
     );
-    return result.trim().length > 0;
+    return result.split('\n').some((line: string) => line.trim().length > 0);
   } catch {
     return false;
   }

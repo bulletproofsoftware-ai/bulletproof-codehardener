@@ -43,12 +43,20 @@ function mutationScoreToSeverity(score: number): Severity {
 function hasTestFiles(dir: string): boolean {
   // Quick check for common test file patterns
   try {
-    const { execSync } = require('child_process');
-    const result = execSync(
-      `find ${dir} -maxdepth 4 \\( -name "*.test.ts" -o -name "*.test.js" -o -name "*.spec.ts" -o -name "*.spec.js" \\) -not -path "*/node_modules/*" 2>/dev/null | head -1`,
-      { encoding: 'utf-8', timeout: 5000 }
+    const { execFileSync } = require('child_process');
+    // execFile with an argument array — no shell, so `dir` cannot be interpreted
+    // as a shell metacharacter sequence. Pipe to `head` is replaced by a JS-side slice.
+    const result = execFileSync(
+      'find',
+      [
+        dir, '-maxdepth', '4',
+        '(', '-name', '*.test.ts', '-o', '-name', '*.test.js',
+        '-o', '-name', '*.spec.ts', '-o', '-name', '*.spec.js', ')',
+        '-not', '-path', '*/node_modules/*',
+      ],
+      { encoding: 'utf-8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] }
     );
-    return result.trim().length > 0;
+    return result.split('\n').some((line: string) => line.trim().length > 0);
   } catch {
     return false;
   }

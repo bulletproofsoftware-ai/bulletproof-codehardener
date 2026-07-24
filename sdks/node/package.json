@@ -16,7 +16,7 @@
     "prepublishOnly": "npm run build"
   },
   "keywords": ["security", "scanning", "sast", "dast", "sca", "devsecops", "codehardener"],
-  "license": "MIT",
+  "license": "Apache-2.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/codehardener/codehardener"

@@ -18,12 +18,19 @@ function mutationScoreToSeverity(score: number): Severity {
 
 function hasPythonTests(dir: string): boolean {
   try {
-    const { execSync } = require('child_process');
-    const result = execSync(
-      `find ${dir} -maxdepth 4 \\( -name "test_*.py" -o -name "*_test.py" -o -name "tests.py" \\) -not -path "*/venv/*" -not -path "*/.venv/*" 2>/dev/null | head -1`,
-      { encoding: 'utf-8', timeout: 5000 }
+    const { execFileSync } = require('child_process');
+    // execFile with an argument array — no shell interpolation of `dir`.
+    const result = execFileSync(
+      'find',
+      [
+        dir, '-maxdepth', '4',
+        '(', '-name', 'test_*.py', '-o', '-name', '*_test.py', '-o', '-name', 'tests.py', ')',
+        '-not', '-path', '*/venv/*',
+        '-not', '-path', '*/.venv/*',
+      ],
+      { encoding: 'utf-8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] }
     );
-    return result.trim().length > 0;
+    return result.split('\n').some((line: string) => line.trim().length > 0);
   } catch {
     return false;
   }
@@ -35,12 +42,22 @@ function findPythonSourceDir(dir: string): string | null {
     const fullPath = `${dir}/${candidate}`;
     if (existsSync(fullPath)) {
       try {
-        const { execSync } = require('child_process');
-        const result = execSync(
-          `find ${fullPath} -maxdepth 2 -name "*.py" -not -name "test_*" -not -name "*_test.py" -not -path "*/test*/*" -not -path "*/venv/*" 2>/dev/null | head -1`,
-          { encoding: 'utf-8', timeout: 5000 }
+        const { execFileSync } = require('child_process');
+        // execFile with an argument array — no shell interpolation of `fullPath`.
+        const result = execFileSync(
+          'find',
+          [
+            fullPath, '-maxdepth', '2', '-name', '*.py',
+            '-not', '-name', 'test_*',
+            '-not', '-name', '*_test.py',
+            '-not', '-path', '*/test*/*',
+            '-not', '-path', '*/venv/*',
+          ],
+          { encoding: 'utf-8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] }
         );
-        if (result.trim()) return candidate === '.' ? dir : fullPath;
+        if (result.split('\n').some((line: string) => line.trim().length > 0)) {
+          return candidate === '.' ? dir : fullPath;
+        }
       } catch { continue; }
     }
   }

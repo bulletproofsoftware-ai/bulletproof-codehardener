@@ -69,12 +69,20 @@ function hasPytestConfig(dir: string): boolean {
 
 function hasPythonTestFiles(dir: string): boolean {
   try {
-    const { execSync } = require('child_process');
-    const result = execSync(
-      `find ${dir} -maxdepth 4 \\( -name "test_*.py" -o -name "*_test.py" \\) -not -path "*/node_modules/*" -not -path "*/.venv/*" -not -path "*/venv/*" 2>/dev/null | head -1`,
-      { encoding: 'utf-8', timeout: 5000 }
+    const { execFileSync } = require('child_process');
+    // execFile with an argument array — no shell interpolation of `dir`.
+    const result = execFileSync(
+      'find',
+      [
+        dir, '-maxdepth', '4',
+        '(', '-name', 'test_*.py', '-o', '-name', '*_test.py', ')',
+        '-not', '-path', '*/node_modules/*',
+        '-not', '-path', '*/.venv/*',
+        '-not', '-path', '*/venv/*',
+      ],
+      { encoding: 'utf-8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] }
     );
-    return result.trim().length > 0;
+    return result.split('\n').some((line: string) => line.trim().length > 0);
   } catch {
     return false;
   }
@@ -82,12 +90,19 @@ function hasPythonTestFiles(dir: string): boolean {
 
 function hasPythonFiles(dir: string): boolean {
   try {
-    const { execSync } = require('child_process');
-    const result = execSync(
-      `find ${dir} -maxdepth 6 -name "*.py" -not -path "*/node_modules/*" -not -path "*/.venv/*" -not -path "*/venv/*" 2>/dev/null | head -1`,
-      { encoding: 'utf-8', timeout: 5000 }
+    const { execFileSync } = require('child_process');
+    // execFile with an argument array — no shell interpolation of `dir`.
+    const result = execFileSync(
+      'find',
+      [
+        dir, '-maxdepth', '6', '-name', '*.py',
+        '-not', '-path', '*/node_modules/*',
+        '-not', '-path', '*/.venv/*',
+        '-not', '-path', '*/venv/*',
+      ],
+      { encoding: 'utf-8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] }
     );
-    return result.trim().length > 0;
+    return result.split('\n').some((line: string) => line.trim().length > 0);
   } catch {
     return false;
   }

@@ -67,12 +67,20 @@ function hasJestConfig(dir: string): boolean {
 
 function hasTestFiles(dir: string): boolean {
   try {
-    const { execSync } = require('child_process');
-    const result = execSync(
-      `find ${dir} -maxdepth 4 \\( -name "*.test.ts" -o -name "*.test.js" -o -name "*.test.tsx" -o -name "*.test.jsx" -o -name "*.spec.ts" -o -name "*.spec.js" \\) -not -path "*/node_modules/*" 2>/dev/null | head -1`,
-      { encoding: 'utf-8', timeout: 5000 }
+    const { execFileSync } = require('child_process');
+    // execFile with an argument array — no shell interpolation of `dir`.
+    const result = execFileSync(
+      'find',
+      [
+        dir, '-maxdepth', '4',
+        '(', '-name', '*.test.ts', '-o', '-name', '*.test.js',
+        '-o', '-name', '*.test.tsx', '-o', '-name', '*.test.jsx',
+        '-o', '-name', '*.spec.ts', '-o', '-name', '*.spec.js', ')',
+        '-not', '-path', '*/node_modules/*',
+      ],
+      { encoding: 'utf-8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] }
     );
-    return result.trim().length > 0;
+    return result.split('\n').some((line: string) => line.trim().length > 0);
   } catch {
     return false;
   }
