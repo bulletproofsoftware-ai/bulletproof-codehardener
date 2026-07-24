@@ -1,0 +1,83 @@
+{
+  "defaults": {
+    "standard": "WCAG2AA",
+    "timeout": 30000,
+    "wait": 1000,
+    "chromeLaunchConfig": {
+      "args": ["--no-sandbox", "--disable-setuid-sandbox"]
+    },
+    "hideElements": ".ad-banner, .cookie-notice",
+    "ignore": [
+      "WCAG2AA.Principle1.Guideline1_4.1_4_3.G18.Fail"
+    ]
+  },
+  "urls": [
+    {
+      "url": "http://localhost:3000",
+      "screenCapture": "./reports/accessibility/home.png"
+    },
+    {
+      "url": "http://localhost:3000/features",
+      "screenCapture": "./reports/accessibility/features.png"
+    },
+    {
+      "url": "http://localhost:3000/pricing",
+      "screenCapture": "./reports/accessibility/pricing.png"
+    },
+    {
+      "url": "http://localhost:3000/docs",
+      "screenCapture": "./reports/accessibility/docs.png"
+    },
+    {
+      "url": "http://localhost:3000/about",
+      "screenCapture": "./reports/accessibility/about.png"
+    },
+    {
+      "url": "http://localhost:3000/contact",
+      "screenCapture": "./reports/accessibility/contact.png"
+    },
+    {
+      "url": "http://localhost:3000/login",
+      "screenCapture": "./reports/accessibility/login.png"
+    },
+    {
+      "url": "http://localhost:3000/signup",
+      "screenCapture": "./reports/accessibility/signup.png"
+    },
+    {
+      "url": "http://localhost:3000/privacy",
+      "screenCapture": "./reports/accessibility/privacy.png"
+    },
+    {
+      "url": "http://localhost:3000/terms",
+      "screenCapture": "./reports/accessibility/terms.png"
+    },
+    {
+      "url": "http://localhost:3001",
+      "actions": [
+        "wait for element body to be visible"
+      ],
+      "screenCapture": "./reports/accessibility/dashboard-home.png"
+    },
+    {
+      "url": "http://localhost:3001/projects",
+      "screenCapture": "./reports/accessibility/dashboard-projects.png"
+    },
+    {
+      "url": "http://localhost:3001/scans",
+      "screenCapture": "./reports/accessibility/dashboard-scans.png"
+    },
+    {
+      "url": "http://localhost:3001/findings",
+      "screenCapture": "./reports/accessibility/dashboard-findings.png"
+    },
+    {
+      "url": "http://localhost:3001/attestations",
+      "screenCapture": "./reports/accessibility/dashboard-attestations.png"
+    },
+    {
+      "url": "http://localhost:3001/settings",
+      "screenCapture": "./reports/accessibility/dashboard-settings.png"
+    }
+  ]
+}

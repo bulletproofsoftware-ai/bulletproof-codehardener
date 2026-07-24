@@ -1,0 +1,155 @@
+name: 'Code Hardener Security Scan'
+description: 'Run Code Hardener security scans in your CI/CD pipeline — 35 security tools, one command'
+author: 'Code Hardener'
+branding:
+  icon: 'shield'
+  color: 'blue'
+
+inputs:
+  api-url:
+    description: 'Code Hardener API URL'
+    required: false
+    default: 'https://api.codehardener.com'
+  api-key:
+    description: 'Code Hardener API key (from secrets)'
+    required: true
+  profile:
+    description: 'Scan profile: quick, standard, comprehensive, auto'
+    required: false
+    default: 'standard'
+  scanners:
+    description: 'Comma-separated list of specific scanners to run'
+    required: false
+  fail-on:
+    description: 'Fail the check on: critical, high, medium, low, never'
+    required: false
+    default: 'high'
+  sarif:
+    description: 'Upload SARIF results to GitHub Security tab'
+    required: false
+    default: 'true'
+
+outputs:
+  scan-id:
+    description: 'The scan ID for further reference'
+  score:
+    description: 'Security score (0-1000)'
+  risk-level:
+    description: 'Risk level: excellent, good, moderate, poor, critical'
+  findings-count:
+    description: 'Total number of findings'
+  critical-count:
+    description: 'Number of critical findings'
+  high-count:
+    description: 'Number of high findings'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Run Code Hardener Scan
+      id: scan
+      shell: bash
+      env:
+        CODEHARDENER_URL: ${{ inputs.api-url }}
+        CODEHARDENER_API_KEY: ${{ inputs.api-key }}
+        INPUT_PROFILE: ${{ inputs.profile }}
+      run: |
+        # Create scan (inputs passed via env to avoid shell injection)
+        RESPONSE=$(curl -sf -X POST "$CODEHARDENER_URL/api/v1/scans" \
+          -H "Authorization: Bearer $CODEHARDENER_API_KEY" \
+          -H "Content-Type: application/json" \
+          -d "{
+            \"repositoryUrl\": \"$GITHUB_SERVER_URL/$GITHUB_REPOSITORY\",
+            \"branch\": \"${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}\",
+            \"commitSha\": \"$GITHUB_SHA\",
+            \"profile\": \"$INPUT_PROFILE\",
+            \"triggerType\": \"github-action\"
+          }")
+
+        SCAN_ID=$(echo "$RESPONSE" | jq -r '.data.id // .data.scanId // empty')
+        if [ -z "$SCAN_ID" ]; then
+          echo "::error::Failed to start scan"
+          echo "$RESPONSE"
+          exit 1
+        fi
+
+        echo "scan-id=$SCAN_ID" >> "$GITHUB_OUTPUT"
+        echo "Scan started: $SCAN_ID"
+
+        # Poll for completion (max 10 minutes)
+        for i in $(seq 1 200); do
+          sleep 3
+          STATUS=$(curl -sf "$CODEHARDENER_URL/api/v1/scans/$SCAN_ID" \
+            -H "Authorization: Bearer $CODEHARDENER_API_KEY" | jq -r '.data.status // empty')
+
+          if [ "$STATUS" = "completed" ]; then
+            break
+          elif [ "$STATUS" = "failed" ]; then
+            echo "::error::Scan failed"
+            exit 1
+          fi
+          printf '.'
+        done
+        echo ""
+
+        # Get results
+        RESULTS=$(curl -sf "$CODEHARDENER_URL/api/v1/scans/$SCAN_ID" \
+          -H "Authorization: Bearer $CODEHARDENER_API_KEY")
+
+        SCORE=$(echo "$RESULTS" | jq -r '.data.score // 0')
+        RISK=$(echo "$RESULTS" | jq -r '.data.riskLevel // "unknown"')
+        TOTAL=$(echo "$RESULTS" | jq -r '.data.findingsCount // 0')
+        CRITICAL=$(echo "$RESULTS" | jq -r '.data.findingsSummary.critical // 0')
+        HIGH=$(echo "$RESULTS" | jq -r '.data.findingsSummary.high // 0')
+
+        echo "score=$SCORE" >> "$GITHUB_OUTPUT"
+        echo "risk-level=$RISK" >> "$GITHUB_OUTPUT"
+        echo "findings-count=$TOTAL" >> "$GITHUB_OUTPUT"
+        echo "critical-count=$CRITICAL" >> "$GITHUB_OUTPUT"
+        echo "high-count=$HIGH" >> "$GITHUB_OUTPUT"
+
+        echo "## Code Hardener Results" >> "$GITHUB_STEP_SUMMARY"
+        echo "| Metric | Value |" >> "$GITHUB_STEP_SUMMARY"
+        echo "|--------|-------|" >> "$GITHUB_STEP_SUMMARY"
+        echo "| Score | $SCORE/1000 |" >> "$GITHUB_STEP_SUMMARY"
+        echo "| Risk Level | $RISK |" >> "$GITHUB_STEP_SUMMARY"
+        echo "| Total Findings | $TOTAL |" >> "$GITHUB_STEP_SUMMARY"
+        echo "| Critical | $CRITICAL |" >> "$GITHUB_STEP_SUMMARY"
+        echo "| High | $HIGH |" >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Download SARIF
+      if: inputs.sarif == 'true'
+      shell: bash
+      env:
+        CODEHARDENER_URL: ${{ inputs.api-url }}
+        CODEHARDENER_API_KEY: ${{ inputs.api-key }}
+        SCAN_ID: ${{ steps.scan.outputs.scan-id }}
+      run: |
+        curl -sf "$CODEHARDENER_URL/api/v1/scans/$SCAN_ID/report?format=sarif" \
+          -H "Authorization: Bearer $CODEHARDENER_API_KEY" \
+          -o codehardener-results.sarif || true
+
+    - name: Upload SARIF
+      if: inputs.sarif == 'true'
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: codehardener-results.sarif
+      continue-on-error: true
+
+    - name: Check Threshold
+      shell: bash
+      env:
+        FAIL_ON: ${{ inputs.fail-on }}
+        CRITICAL: ${{ steps.scan.outputs.critical-count }}
+        HIGH: ${{ steps.scan.outputs.high-count }}
+      run: |
+
+        if [ "$FAIL_ON" = "never" ]; then
+          exit 0
+        elif [ "$FAIL_ON" = "critical" ] && [ "$CRITICAL" -gt 0 ]; then
+          echo "::error::$CRITICAL critical findings found"
+          exit 1
+        elif [ "$FAIL_ON" = "high" ] && [ $(($CRITICAL + $HIGH)) -gt 0 ]; then
+          echo "::error::$CRITICAL critical and $HIGH high findings found"
+          exit 1
+        fi

@@ -1,0 +1,119 @@
+# Code Hardener - Spike Test
+# Tests system response to sudden traffic surges
+#
+# Usage: artillery run spike.yml
+
+config:
+  target: "http://localhost:4000"
+  phases:
+    # Baseline load
+    - duration: 60
+      arrivalRate: 5
+      name: "Baseline"
+    # Sudden spike
+    - duration: 30
+      arrivalRate: 100
+      name: "Spike"
+    # Return to baseline
+    - duration: 60
+      arrivalRate: 5
+      name: "Recovery"
+  defaults:
+    headers:
+      Content-Type: "application/json"
+  plugins:
+    expect: {}
+  ensure:
+    maxErrorRate: 10
+    p95ResponseTime: 2000
+
+scenarios:
+  - name: "Health Check During Spike"
+    weight: 3
+    flow:
+      - get:
+          url: "/health"
+          expect:
+            - statusCode: 200
+            - hasProperty: "status"
+
+  - name: "API Version Check"
+    weight: 2
+    flow:
+      - get:
+          url: "/api/version"
+          expect:
+            - statusCode: 200
+
+  - name: "Marketing Pages"
+    weight: 3
+    flow:
+      - get:
+          url: "http://localhost:3000/"
+          expect:
+            - statusCode: 200
+      - think: 1
+      - get:
+          url: "http://localhost:3000/features"
+          expect:
+            - statusCode: 200
+      - think: 1
+      - get:
+          url: "http://localhost:3000/pricing"
+          expect:
+            - statusCode: 200
+
+  - name: "Login Flow"
+    weight: 2
+    flow:
+      - post:
+          url: "/api/auth/login"
+          json:
+            email: "test@codehardener.local"
+            password: "TestPassword123!"
+          capture:
+            - json: "$.token"
+              as: "authToken"
+          expect:
+            - statusCode:
+                - 200
+                - 401
+      - think: 1
+      - get:
+          url: "/api/auth/me"
+          headers:
+            Authorization: "Bearer {{ authToken }}"
+          ifTrue: "authToken"
+          expect:
+            - statusCode:
+                - 200
+                - 401
+
+  - name: "API Data Requests"
+    weight: 2
+    flow:
+      - post:
+          url: "/api/auth/login"
+          json:
+            email: "test@codehardener.local"
+            password: "TestPassword123!"
+          capture:
+            - json: "$.token"
+              as: "authToken"
+      - get:
+          url: "/api/projects"
+          headers:
+            Authorization: "Bearer {{ authToken }}"
+          ifTrue: "authToken"
+      - think: 0.5
+      - get:
+          url: "/api/scans"
+          headers:
+            Authorization: "Bearer {{ authToken }}"
+          ifTrue: "authToken"
+      - think: 0.5
+      - get:
+          url: "/api/findings/summary"
+          headers:
+            Authorization: "Bearer {{ authToken }}"
+          ifTrue: "authToken"

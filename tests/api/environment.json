@@ -1,0 +1,27 @@
+{
+  "id": "codehardener-local",
+  "name": "Code Hardener - Local",
+  "values": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:4000",
+      "enabled": true
+    },
+    {
+      "key": "authToken",
+      "value": "",
+      "enabled": true
+    },
+    {
+      "key": "testUserEmail",
+      "value": "test@codehardener.local",
+      "enabled": true
+    },
+    {
+      "key": "testUserPassword",
+      "value": "TestPassword123!",
+      "enabled": true
+    }
+  ],
+  "_postman_variable_scope": "environment"
+}

@@ -1,0 +1,145 @@
+{
+  "_comment": "Code Hardener - Gosec Configuration. Maximizes detection with low thresholds; downstream filtering handles noise.",
+  "global": {
+    "audit": true,
+    "nosec": false,
+    "nosec-tag": "gosec:ignore",
+    "show-ignored": true
+  },
+  "severity": "low",
+  "confidence": "low",
+  "concurrency": 4,
+  "include": [
+    "G101",
+    "G102",
+    "G103",
+    "G104",
+    "G106",
+    "G107",
+    "G108",
+    "G109",
+    "G110",
+    "G111",
+    "G112",
+    "G113",
+    "G114",
+    "G201",
+    "G202",
+    "G203",
+    "G204",
+    "G301",
+    "G302",
+    "G303",
+    "G304",
+    "G305",
+    "G306",
+    "G307",
+    "G401",
+    "G402",
+    "G403",
+    "G404",
+    "G405",
+    "G406",
+    "G501",
+    "G502",
+    "G503",
+    "G504",
+    "G505",
+    "G506",
+    "G507",
+    "G601",
+    "G602"
+  ],
+  "exclude-dir": [
+    "vendor",
+    "testdata",
+    "test",
+    "tests",
+    "mock",
+    "mocks",
+    "fixtures",
+    "third_party",
+    "generated",
+    "proto"
+  ],
+  "output": "json",
+  "sort": true,
+  "rules": {
+    "G101": {
+      "_description": "Look for hardcoded credentials",
+      "pattern": "(?i)(password|passwd|pwd|secret|token|api_key|apikey|access_key|auth|credential|private_key)",
+      "ignore_nosec": false,
+      "entropy_threshold": 80.0,
+      "per_char_threshold": 3.0,
+      "truncate": 16
+    },
+    "G104": {
+      "_description": "Audit errors not checked",
+      "packages": [
+        "crypto/rand",
+        "io",
+        "os",
+        "net/http",
+        "database/sql"
+      ]
+    },
+    "G107": {
+      "_description": "URL provided to HTTP request as taint input (SSRF)",
+      "packages": [
+        "net/http"
+      ]
+    },
+    "G110": {
+      "_description": "Potential DoS vulnerability via decompression bomb",
+      "packages": [
+        "compress/gzip",
+        "compress/zlib",
+        "compress/bzip2",
+        "compress/flate",
+        "archive/tar",
+        "archive/zip"
+      ]
+    },
+    "G201": {
+      "_description": "SQL query construction using format string",
+      "packages": [
+        "database/sql"
+      ]
+    },
+    "G202": {
+      "_description": "SQL query construction using string concatenation",
+      "packages": [
+        "database/sql"
+      ]
+    },
+    "G301": {
+      "_description": "Poor file permissions used when creating a directory",
+      "mode": "0750"
+    },
+    "G302": {
+      "_description": "Poor file permissions used when creating a file",
+      "mode": "0640"
+    },
+    "G306": {
+      "_description": "Poor file permissions used when writing to a new file",
+      "mode": "0640"
+    },
+    "G401": {
+      "_description": "Detect the usage of MD5 or SHA1",
+      "packages": [
+        "crypto/md5",
+        "crypto/sha1"
+      ]
+    },
+    "G402": {
+      "_description": "TLS with insecure cipher suite or version",
+      "min_tls_version": "1.2"
+    },
+    "G404": {
+      "_description": "Insecure random number source (math/rand)",
+      "packages": [
+        "math/rand"
+      ]
+    }
+  }
+}

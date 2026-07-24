@@ -1,0 +1,189 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Code Hardener - PMD Ruleset Configuration
+  Multi-language static analysis for Java and ECMAScript/JavaScript.
+  Reference: https://docs.pmd-code.org/latest/pmd_userdocs_making_rulesets.html
+-->
+<ruleset name="Code Hardener Security Ruleset"
+         xmlns="http://pmd.sourceforge.net/ruleset/2.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://pmd.sourceforge.net/ruleset/2.0.0
+                             https://pmd.sourceforge.io/ruleset_2_0_0.xsd">
+
+    <description>
+        Production security ruleset for Code Hardener platform.
+        Covers Java and ECMAScript with focus on security, error handling,
+        best practices, and multithreading issues. Minimum priority 3 (medium).
+    </description>
+
+    <!-- Global Exclusions -->
+
+    <exclude-pattern>.*/test/.*</exclude-pattern>
+    <exclude-pattern>.*/tests/.*</exclude-pattern>
+    <exclude-pattern>.*/spec/.*</exclude-pattern>
+    <exclude-pattern>.*/node_modules/.*</exclude-pattern>
+    <exclude-pattern>.*/vendor/.*</exclude-pattern>
+    <exclude-pattern>.*/build/.*</exclude-pattern>
+    <exclude-pattern>.*/dist/.*</exclude-pattern>
+    <exclude-pattern>.*/target/.*</exclude-pattern>
+    <exclude-pattern>.*/generated/.*</exclude-pattern>
+
+    <!-- Java: Security Rules -->
+
+    <rule ref="category/java/security.xml">
+        <priority>1</priority>
+    </rule>
+
+    <!-- Java: Error Prone Rules -->
+
+    <rule ref="category/java/errorprone.xml">
+        <priority>3</priority>
+        <exclude name="BeanMembersShouldSerialize" />
+        <exclude name="DataflowAnomalyAnalysis" />
+        <exclude name="NullAssignment" />
+    </rule>
+
+    <rule ref="category/java/errorprone.xml/AvoidCatchingThrowable">
+        <priority>1</priority>
+    </rule>
+
+    <rule ref="category/java/errorprone.xml/EmptyCatchBlock">
+        <priority>1</priority>
+        <properties>
+            <property name="allowCommentedBlocks" value="true" />
+            <property name="allowExceptionNameRegex" value="^(ignored|expected)$" />
+        </properties>
+    </rule>
+
+    <rule ref="category/java/errorprone.xml/AvoidUsingOctalValues">
+        <priority>2</priority>
+    </rule>
+
+    <rule ref="category/java/errorprone.xml/DoNotTerminateVM">
+        <priority>1</priority>
+    </rule>
+
+    <rule ref="category/java/errorprone.xml/MethodWithSameNameAsEnclosingClass">
+        <priority>2</priority>
+    </rule>
+
+    <!-- Java: Best Practices -->
+
+    <rule ref="category/java/bestpractices.xml">
+        <priority>3</priority>
+        <exclude name="JUnitTestsShouldIncludeAssert" />
+        <exclude name="JUnitAssertionsShouldIncludeMessage" />
+        <exclude name="GuardLogStatement" />
+    </rule>
+
+    <rule ref="category/java/bestpractices.xml/AvoidReassigningParameters">
+        <priority>2</priority>
+    </rule>
+
+    <rule ref="category/java/bestpractices.xml/PreserveStackTrace">
+        <priority>1</priority>
+    </rule>
+
+    <rule ref="category/java/bestpractices.xml/SystemPrintln">
+        <priority>2</priority>
+    </rule>
+
+    <rule ref="category/java/bestpractices.xml/UnusedPrivateField">
+        <priority>3</priority>
+    </rule>
+
+    <rule ref="category/java/bestpractices.xml/UnusedPrivateMethod">
+        <priority>3</priority>
+    </rule>
+
+    <!-- Java: Multithreading Rules -->
+
+    <rule ref="category/java/multithreading.xml">
+        <priority>2</priority>
+    </rule>
+
+    <rule ref="category/java/multithreading.xml/AvoidSynchronizedAtMethodLevel">
+        <priority>3</priority>
+    </rule>
+
+    <rule ref="category/java/multithreading.xml/DoNotUseThreads">
+        <priority>3</priority>
+    </rule>
+
+    <rule ref="category/java/multithreading.xml/DoubleCheckedLocking">
+        <priority>1</priority>
+    </rule>
+
+    <rule ref="category/java/multithreading.xml/UnsynchronizedStaticFormatter">
+        <priority>2</priority>
+    </rule>
+
+    <!-- Java: Design Rules (Security-Relevant) -->
+
+    <rule ref="category/java/design.xml/AvoidDeeplyNestedIfStmts">
+        <priority>3</priority>
+        <properties>
+            <property name="problemDepth" value="4" />
+        </properties>
+    </rule>
+
+    <rule ref="category/java/design.xml/CyclomaticComplexity">
+        <priority>3</priority>
+        <properties>
+            <property name="classReportLevel" value="80" />
+            <property name="methodReportLevel" value="15" />
+        </properties>
+    </rule>
+
+    <rule ref="category/java/design.xml/CognitiveComplexity">
+        <priority>3</priority>
+        <properties>
+            <property name="reportLevel" value="20" />
+        </properties>
+    </rule>
+
+    <rule ref="category/java/design.xml/SimplifyBooleanReturns">
+        <priority>3</priority>
+    </rule>
+
+    <!-- ECMAScript/JavaScript: Error Prone Rules -->
+
+    <rule ref="category/ecmascript/errorprone.xml">
+        <priority>3</priority>
+    </rule>
+
+    <rule ref="category/ecmascript/errorprone.xml/EqualComparison">
+        <priority>2</priority>
+    </rule>
+
+    <rule ref="category/ecmascript/errorprone.xml/InnaccurateNumericLiteral">
+        <priority>3</priority>
+    </rule>
+
+    <!-- ECMAScript/JavaScript: Best Practices -->
+
+    <rule ref="category/ecmascript/bestpractices.xml">
+        <priority>3</priority>
+    </rule>
+
+    <rule ref="category/ecmascript/bestpractices.xml/AvoidWithStatement">
+        <priority>1</priority>
+    </rule>
+
+    <rule ref="category/ecmascript/bestpractices.xml/ConsistentReturn">
+        <priority>2</priority>
+    </rule>
+
+    <rule ref="category/ecmascript/bestpractices.xml/GlobalVariable">
+        <priority>2</priority>
+    </rule>
+
+    <rule ref="category/ecmascript/bestpractices.xml/ScopeForInVariable">
+        <priority>2</priority>
+    </rule>
+
+    <rule ref="category/ecmascript/bestpractices.xml/UseBaseWithParseInt">
+        <priority>2</priority>
+    </rule>
+
+</ruleset>

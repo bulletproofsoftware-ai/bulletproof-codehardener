@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Documentation - Code Hardener</title>
+  <meta name="description" content="Code Hardener documentation - Learn how to integrate and use our security scanning platform.">
+  <link rel="stylesheet" href="../css/style.css?v=9">
+  <link rel="icon" type="image/png" href="../images/favicon.png">
+</head>
+<body>
+  <!-- Navigation -->
+  <nav class="navbar">
+    <div class="container">
+      <a href="../index.html" class="nav-logo">
+        <img src="../images/AIHardener.png" alt="Code Hardener" height="40">
+      </a>
+      <div class="nav-links">
+        <a href="../index.html#features">Features</a>
+        <a href="../index.html#pricing">Pricing</a>
+        <a href="docs.html" class="active">Docs</a>
+        <a href="about.html">About</a>
+        <a href="contact.html">Contact</a>
+      </div>
+      <div class="nav-cta">
+        <a href="https://app.codehardener.com/login" class="btn btn-ghost">Sign In</a>
+        <a href="https://app.codehardener.com/register" class="btn btn-primary">Get Started</a>
+      </div>
+      <button class="mobile-menu-btn" aria-label="Toggle menu">
+        <span></span>
+        <span></span>
+        <span></span>
+      </button>
+    </div>
+  </nav>
+
+  <!-- Docs Hero -->
+  <section class="page-hero">
+    <div class="container">
+      <h1>Documentation</h1>
+      <p>Everything you need to integrate Code Hardener into your workflow.</p>
+    </div>
+  </section>
+
+  <!-- Docs Content -->
+  <section class="docs-section">
+    <div class="container">
+      <div class="docs-grid">
+        <!-- Quick Start Cards -->
+        <div class="docs-card">
+          <div class="docs-icon">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+            </svg>
+          </div>
+          <h3>Quick Start</h3>
+          <p>Get up and running with Code Hardener in under 5 minutes. Create your account, connect your first repository, and run your first scan.</p>
+          <a href="#quickstart" class="docs-link">Get started &rarr;</a>
+        </div>
+
+        <div class="docs-card">
+          <div class="docs-icon">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+              <line x1="9" y1="3" x2="9" y2="21"></line>
+            </svg>
+          </div>
+          <h3>Integrations</h3>
+          <p>Learn how to integrate Code Hardener with your IDE, CI/CD pipeline, or AI coding assistant for seamless security scanning.</p>
+          <a href="#integrations" class="docs-link">View integrations &rarr;</a>
+        </div>
+
+        <div class="docs-card">
+          <div class="docs-icon">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+              <polyline points="14 2 14 8 20 8"></polyline>
+              <line x1="16" y1="13" x2="8" y2="13"></line>
+              <line x1="16" y1="17" x2="8" y2="17"></line>
+              <polyline points="10 9 9 9 8 9"></polyline>
+            </svg>
+          </div>
+          <h3>API Reference</h3>
+          <p>Complete REST API documentation for programmatic access to Code Hardener's scanning capabilities.</p>
+          <a href="#api" class="docs-link">View API docs &rarr;</a>
+        </div>
+
+        <div class="docs-card">
+          <div class="docs-icon">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+            </svg>
+          </div>
+          <h3>Security Scanners</h3>
+          <p>Detailed information about the 27 security tools integrated into Code Hardener and how they work together.</p>
+          <a href="#scanners" class="docs-link">Explore scanners &rarr;</a>
+        </div>
+      </div>
+
+      <!-- Quick Start Section -->
+      <div class="docs-content" id="quickstart">
+        <h2>Quick Start Guide</h2>
+
+        <div class="step-guide">
+          <div class="step-item">
+            <div class="step-number">1</div>
+            <div class="step-content">
+              <h4>Create your account</h4>
+              <p>Sign up for a free account at <a href="https://app.codehardener.com/register">app.codehardener.com</a>. No credit card required.</p>
+            </div>
+          </div>
+
+          <div class="step-item">
+            <div class="step-number">2</div>
+            <div class="step-content">
+              <h4>Connect your repository</h4>
+              <p>Link your GitHub, GitLab, or Bitbucket account to import your repositories. We use OAuth so we never see your password.</p>
+            </div>
+          </div>
+
+          <div class="step-item">
+            <div class="step-number">3</div>
+            <div class="step-content">
+              <h4>Run your first scan</h4>
+              <p>Select a repository and click "Scan Now". Code Hardener automatically detects your languages and runs the appropriate security tools.</p>
+            </div>
+          </div>
+
+          <div class="step-item">
+            <div class="step-number">4</div>
+            <div class="step-content">
+              <h4>Review findings</h4>
+              <p>View your security score, browse findings by severity, and get plain-language explanations with fix suggestions.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Integration Methods -->
+      <div class="docs-content" id="integrations">
+        <h2>Integration Methods</h2>
+        <p>Code Hardener works wherever you write code. Choose the integration that fits your workflow:</p>
+
+        <div class="integration-docs">
+          <div class="integration-doc">
+            <h4>Natural Language Prompt</h4>
+            <p>Simply ask your AI coding assistant to "run a security scan" and Code Hardener handles the rest.</p>
+            <pre><code>"Please scan this code for security vulnerabilities"</code></pre>
+          </div>
+
+          <div class="integration-doc">
+            <h4>MCP Server (Claude/Cursor)</h4>
+            <p>Add Code Hardener as an MCP server for native integration with Claude and Cursor.</p>
+            <pre><code>{
+  "mcpServers": {
+    "codehardener": {
+      "command": "npx",
+      "args": ["@codehardener/mcp-server"]
+    }
+  }
+}</code></pre>
+          </div>
+
+          <div class="integration-doc">
+            <h4>REST API</h4>
+            <p>Integrate directly with our REST API for custom workflows and automation.</p>
+            <pre><code>curl -X POST https://api.codehardener.com/v1/scans \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"projectId": "proj_xxx", "profile": "standard"}'</code></pre>
+          </div>
+
+          <div class="integration-doc">
+            <h4>GitHub Action</h4>
+            <p>Add security scanning to your CI/CD pipeline with our GitHub Action.</p>
+            <pre><code>- name: Code Hardener Security Scan
+  uses: codehardener/scan-action@v1
+  with:
+    api-key: ${{ secrets.AIHARDENER_API_KEY }}
+    profile: comprehensive</code></pre>
+          </div>
+        </div>
+      </div>
+
+      <!-- Scanners Section -->
+      <div class="docs-content" id="scanners">
+        <h2>Integrated Security Tools</h2>
+        <p>Code Hardener integrates 27 best-in-class open-source security tools, all with permissive licenses:</p>
+
+        <div class="scanner-grid">
+          <div class="scanner-category">
+            <h4>Static Analysis (SAST)</h4>
+            <ul>
+              <li><strong>Bandit</strong> - Python security linter</li>
+              <li><strong>Gosec</strong> - Go security checker</li>
+              <li><strong>ESLint Security</strong> - JavaScript/TypeScript</li>
+              <li><strong>PMD</strong> - Multi-language analyzer</li>
+              <li><strong>Opengrep</strong> - Pattern-based analysis</li>
+            </ul>
+          </div>
+
+          <div class="scanner-category">
+            <h4>Dynamic Analysis (DAST)</h4>
+            <ul>
+              <li><strong>OWASP ZAP</strong> - Web app scanner</li>
+              <li><strong>Nuclei</strong> - Template-based scanner</li>
+            </ul>
+          </div>
+
+          <div class="scanner-category">
+            <h4>Composition Analysis (SCA)</h4>
+            <ul>
+              <li><strong>Trivy</strong> - Container & dependency scanning</li>
+              <li><strong>Grype</strong> - Vulnerability scanner</li>
+            </ul>
+          </div>
+
+          <div class="scanner-category">
+            <h4>Secret Detection</h4>
+            <ul>
+              <li><strong>Gitleaks</strong> - Git secret scanner</li>
+              <li><strong>detect-secrets</strong> - Secret detection</li>
+            </ul>
+          </div>
+
+          <div class="scanner-category">
+            <h4>Infrastructure as Code</h4>
+            <ul>
+              <li><strong>Checkov</strong> - IaC security scanner</li>
+            </ul>
+          </div>
+
+          <div class="scanner-category">
+            <h4>Supply Chain</h4>
+            <ul>
+              <li><strong>Syft</strong> - SBOM generation</li>
+              <li><strong>in-toto</strong> - Supply chain integrity</li>
+              <li><strong>Cosign/Sigstore</strong> - Signing & attestation</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- CTA Section -->
+  <section class="cta-section">
+    <div class="container">
+      <h2>Ready to secure your code?</h2>
+      <p>Start scanning in under 5 minutes. Free forever for small projects.</p>
+      <div class="cta-buttons">
+        <a href="https://app.codehardener.com/register" class="btn btn-primary btn-lg">Start Free Trial</a>
+        <a href="contact.html" class="btn btn-outline btn-lg">Talk to Sales</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <div class="container">
+      <div class="footer-grid">
+        <div class="footer-brand">
+          <img src="../images/AIHardener.png" alt="Code Hardener" height="32">
+          <p>Security assurance for AI-first developers.</p>
+        </div>
+        <div class="footer-links">
+          <h4>Product</h4>
+          <a href="../index.html#features">Features</a>
+          <a href="../index.html#pricing">Pricing</a>
+          <a href="../index.html#integrations">Integrations</a>
+        </div>
+        <div class="footer-links">
+          <h4>Resources</h4>
+          <a href="docs.html">Documentation</a>
+          <a href="blog.html">Blog</a>
+          <a href="security.html">Security</a>
+        </div>
+        <div class="footer-links">
+          <h4>Company</h4>
+          <a href="about.html">About</a>
+          <a href="contact.html">Contact</a>
+        </div>
+        <div class="footer-links">
+          <h4>Legal</h4>
+          <a href="privacy.html">Privacy Policy</a>
+          <a href="terms.html">Terms of Service</a>
+        </div>
+      </div>
+      <div class="footer-bottom">
+        <p>&copy; 2024 Code Hardener. All rights reserved.</p>
+      </div>
+    </div>
+  </footer>
+
+  <script src="../js/main.js"></script>
+</body>
+</html>

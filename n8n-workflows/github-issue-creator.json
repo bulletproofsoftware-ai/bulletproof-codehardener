@@ -1,0 +1,68 @@
+{
+  "name": "Code Hardener - GitHub Issue Creator",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "create-issues",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "gi-webhook-trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [220, 300],
+      "webhookId": "aih-create-issues"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Filter findings to critical/high only\nconst input = $input.first().json;\nconst findings = (input.body?.findings || []).filter(\n  f => f.severity === 'critical' || f.severity === 'high'\n);\n\nif (findings.length === 0) {\n  return [{ json: { skipped: true, message: 'No critical/high findings to create issues for' } }];\n}\n\nreturn findings.map(f => ({\n  json: {\n    ...f,\n    repoOwner: input.body?.repoOwner,\n    repoName: input.body?.repoName,\n    scanId: input.body?.scanId\n  }\n}));"
+      },
+      "id": "filter-findings",
+      "name": "Filter Critical/High",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const finding = $input.first().json;\n\nif (finding.skipped) {\n  return [{ json: finding }];\n}\n\nconst severityEmoji = finding.severity === 'critical' ? '🔴' : '🟠';\nconst labels = ['security', `severity:${finding.severity}`, 'codehardener'];\n\nconst title = `${severityEmoji} [${finding.severity.toUpperCase()}] ${finding.title}`;\nconst body = [\n  `## Security Finding`,\n  ``,\n  `**Severity:** ${finding.severity}`,\n  `**Scanner:** ${finding.scanner || 'unknown'}`,\n  `**Rule:** ${finding.ruleId || 'N/A'}`,\n  finding.filePath ? `**File:** \\`${finding.filePath}${finding.lineNumber ? `:${finding.lineNumber}` : ''}\\`` : '',\n  finding.cweId ? `**CWE:** ${finding.cweId}` : '',\n  ``,\n  `### Description`,\n  finding.description || 'No description available.',\n  ``,\n  finding.fixDescription ? `### Recommended Fix\\n${finding.fixDescription}` : '',\n  ``,\n  `---`,\n  `*Created by Code Hardener scan \\`${finding.scanId}\\`*`\n].filter(Boolean).join('\\n');\n\nreturn [{ json: { title, body, labels, repoOwner: finding.repoOwner, repoName: finding.repoName } }];"
+      },
+      "id": "format-issue",
+      "name": "Format Issue",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [660, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Create GitHub issue (requires GitHub credentials configured in n8n)\nconst issue = $input.first().json;\n\nif (issue.skipped) {\n  return [{ json: issue }];\n}\n\ntry {\n  const response = await this.helpers.httpRequest({\n    method: 'POST',\n    url: `https://api.github.com/repos/${issue.repoOwner}/${issue.repoName}/issues`,\n    headers: {\n      'Authorization': `token ${process.env.GITHUB_TOKEN}`,\n      'Accept': 'application/vnd.github.v3+json',\n      'Content-Type': 'application/json'\n    },\n    body: {\n      title: issue.title,\n      body: issue.body,\n      labels: issue.labels\n    }\n  });\n  \n  return [{ json: { created: true, issueUrl: response.html_url, issueNumber: response.number } }];\n} catch (error) {\n  return [{ json: { created: false, error: error.message } }];\n}"
+      },
+      "id": "create-issue",
+      "name": "Create GitHub Issue",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [880, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const results = $input.all().map(item => item.json);\nconst created = results.filter(r => r.created).length;\n\nreturn [{ json: { total: results.length, created, results } }];"
+      },
+      "id": "gi-aggregate",
+      "name": "Aggregate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1100, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": { "main": [[{ "node": "Filter Critical/High", "type": "main", "index": 0 }]] },
+    "Filter Critical/High": { "main": [[{ "node": "Format Issue", "type": "main", "index": 0 }]] },
+    "Format Issue": { "main": [[{ "node": "Create GitHub Issue", "type": "main", "index": 0 }]] },
+    "Create GitHub Issue": { "main": [[{ "node": "Aggregate", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "tags": [{ "name": "codehardener" }, { "name": "github" }],
+  "active": true
+}

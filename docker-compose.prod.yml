@@ -1,0 +1,165 @@
+# Code Hardener - Production Deployment (c2 / scan.codehardener.com)
+# Shares PostgreSQL + n8n with existing claude-memory stack
+# Usage: docker compose -f docker-compose.prod.yml up -d
+
+services:
+  # ============================================================
+  # Redis - Own instance (avoids key collisions with claude-memory)
+  # ============================================================
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy noeviction
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - codehardener
+
+  # ============================================================
+  # Backend API + MCP SSE endpoint
+  # ============================================================
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      HOST: 0.0.0.0
+      DB_HOST: ${EXTERNAL_POSTGRES_HOST:-claude_backend_postgres}
+      DB_PORT: 5432
+      DB_NAME: codehardener
+      DB_USER: codehardener
+      DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
+      CORS_ORIGIN: https://scan.codehardener.com
+      LOG_LEVEL: info
+      N8N_URL: http://${EXTERNAL_N8N_HOST:-claude_backend_n8n}:5678
+      N8N_ENABLED: "true"
+      N8N_WEBHOOK_BASE: http://${EXTERNAL_N8N_HOST:-claude_backend_n8n}:5678/webhook
+      N8N_API_KEY: ${N8N_API_KEY:?Set N8N_API_KEY in .env}
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY:?Set INTERNAL_API_KEY in .env}
+      SIGNING_KEYS_DIR: /data/keys
+      SCANNER_MAX_CONCURRENT: ${SCANNER_MAX_CONCURRENT:-3}
+    ports:
+      - "127.0.0.1:7002:4000"
+    volumes:
+      - signing_keys:/data/keys
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:4000/health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    networks:
+      - codehardener
+      - claude_backend
+
+  # ============================================================
+  # Scanner Worker - 49 security tools
+  # ============================================================
+  scanner:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.scanner
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      DB_HOST: ${EXTERNAL_POSTGRES_HOST:-claude_backend_postgres}
+      DB_PORT: 5432
+      DB_NAME: codehardener
+      DB_USER: codehardener
+      DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      LOG_LEVEL: info
+      SCANNER_TIMEOUT_MS: 300000
+      SCANNER_MAX_CONCURRENT: ${SCANNER_MAX_CONCURRENT:-3}
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY:?Set INTERNAL_API_KEY in .env}
+    volumes:
+      - scan_targets:/scan-target
+      - scan_results:/scan-results
+      - ./scanner-configs:/configs:ro
+      - ./nuclei-templates:/nuclei-templates:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 4G
+    networks:
+      - codehardener
+      - claude_backend
+
+  # ============================================================
+  # Dashboard - Next.js frontend
+  # ============================================================
+  dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: https://scan.codehardener.com/api/v1
+        NEXT_PUBLIC_DEV_MODE: "false"
+        API_URL: http://backend:4000
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      API_URL: http://backend:4000
+    ports:
+      - "127.0.0.1:7001:3000"
+    depends_on:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/ || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    networks:
+      - codehardener
+
+  # ============================================================
+  # Init - One-shot schema + migration runner
+  # ============================================================
+  init:
+    image: postgres:16-alpine
+    entrypoint: ["/bin/sh", "/app/scripts/init-all.sh"]
+    environment:
+      DB_HOST: ${EXTERNAL_POSTGRES_HOST:-claude_backend_postgres}
+      DB_USER: codehardener
+      DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
+      DB_NAME: codehardener
+    volumes:
+      - ./postgres/migrations:/app/migrations:ro
+      - ./scripts:/app/scripts:ro
+    restart: "no"
+    networks:
+      - codehardener
+      - claude_backend
+
+networks:
+  codehardener:
+    driver: bridge
+  claude_backend:
+    external: true
+    name: claude-memory_claude_backend
+
+volumes:
+  redis_data:
+  scan_targets:
+  scan_results:
+  signing_keys:

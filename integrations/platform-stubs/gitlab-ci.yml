@@ -1,0 +1,72 @@
+# Code Hardener GitLab CI Template
+#
+# Usage in .gitlab-ci.yml:
+#   include:
+#     - remote: 'https://raw.githubusercontent.com/codehardener/codehardener/main/integrations/platform-stubs/gitlab-ci.yml'
+#
+# Required CI/CD variables:
+#   CODEHARDENER_API_KEY - API key from Code Hardener dashboard
+
+codehardener:scan:
+  stage: test
+  image: curlimages/curl:latest
+  variables:
+    CODEHARDENER_URL: "https://api.codehardener.com"
+    SCAN_PROFILE: "standard"
+    FAIL_ON: "high"
+  script:
+    - |
+      # Start scan
+      RESPONSE=$(curl -sf -X POST "$CODEHARDENER_URL/api/v1/scans" \
+        -H "Authorization: Bearer $CODEHARDENER_API_KEY" \
+        -H "Content-Type: application/json" \
+        -d "{
+          \"repositoryUrl\": \"$CI_PROJECT_URL\",
+          \"branch\": \"$CI_COMMIT_REF_NAME\",
+          \"commitSha\": \"$CI_COMMIT_SHA\",
+          \"profile\": \"$SCAN_PROFILE\",
+          \"triggerType\": \"gitlab-ci\"
+        }")
+
+      SCAN_ID=$(echo "$RESPONSE" | jq -r '.data.id // empty')
+      echo "Scan started: $SCAN_ID"
+
+      # Poll for completion
+      for i in $(seq 1 200); do
+        sleep 3
+        STATUS=$(curl -sf "$CODEHARDENER_URL/api/v1/scans/$SCAN_ID" \
+          -H "Authorization: Bearer $CODEHARDENER_API_KEY" | jq -r '.data.status // empty')
+
+        [ "$STATUS" = "completed" ] && break
+        [ "$STATUS" = "failed" ] && echo "Scan failed" && exit 1
+      done
+
+      # Get results
+      RESULTS=$(curl -sf "$CODEHARDENER_URL/api/v1/scans/$SCAN_ID" \
+        -H "Authorization: Bearer $CODEHARDENER_API_KEY")
+
+      echo "$RESULTS" | jq '.data | {score, riskLevel, findingsCount}'
+
+      # Check threshold
+      CRITICAL=$(echo "$RESULTS" | jq -r '.data.findingsSummary.critical // 0')
+      HIGH=$(echo "$RESULTS" | jq -r '.data.findingsSummary.high // 0')
+
+      if [ "$FAIL_ON" = "critical" ] && [ "$CRITICAL" -gt 0 ]; then
+        echo "FAILED: $CRITICAL critical findings"
+        exit 1
+      elif [ "$FAIL_ON" = "high" ] && [ $(($CRITICAL + $HIGH)) -gt 0 ]; then
+        echo "FAILED: $CRITICAL critical, $HIGH high findings"
+        exit 1
+      fi
+
+      # Download SARIF
+      curl -sf "$CODEHARDENER_URL/api/v1/scans/$SCAN_ID/report?format=sarif" \
+        -H "Authorization: Bearer $CODEHARDENER_API_KEY" \
+        -o gl-codehardener-results.json || true
+  artifacts:
+    reports:
+      sast: gl-codehardener-results.json
+    when: always
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'

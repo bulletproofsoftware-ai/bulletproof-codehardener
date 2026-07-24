@@ -1,0 +1,193 @@
+# Code Hardener - Trivy Configuration
+# Comprehensive vulnerability, misconfiguration, secret, and license scanning.
+# Reference: https://aquasecurity.github.io/trivy/latest/docs/references/configuration/config-file/
+
+# ─────────────────────────────────────────────
+# Global Settings
+# ─────────────────────────────────────────────
+
+# Scan severity threshold — report all severities for maximum visibility.
+severity:
+  - CRITICAL
+  - HIGH
+  - MEDIUM
+  - LOW
+
+# Exit code when vulnerabilities are found.
+# 0 = informational only (default for CI pipelines that handle results downstream).
+# Set to 1 in strict enforcement mode.
+exit-code: 0
+
+# Output format. Overridden per-scan by the scanner adapter.
+format: json
+
+# ─────────────────────────────────────────────
+# Scanner Selection
+# ─────────────────────────────────────────────
+
+# Enable all scanner types for comprehensive coverage.
+scanners:
+  - vuln        # Known vulnerabilities (CVE database)
+  - misconfig   # Infrastructure misconfigurations
+  - secret      # Embedded secrets and credentials
+  - license     # License compliance checking
+
+# ─────────────────────────────────────────────
+# Vulnerability Scanning
+# ─────────────────────────────────────────────
+
+vulnerability:
+  # Report vulnerabilities even if no fix is available yet.
+  # Set to true to only show actionable (fixable) vulns.
+  ignore-unfixed: false
+
+  # Vulnerability data sources.
+  type:
+    - os       # OS package vulnerabilities
+    - library  # Application library vulnerabilities
+
+# ─────────────────────────────────────────────
+# License Scanning
+# ─────────────────────────────────────────────
+
+license:
+  # Forbidden licenses — scan will flag these as CRITICAL.
+  # AGPL requires source disclosure of any linked/modified code.
+  forbidden:
+    - AGPL-1.0
+    - AGPL-1.0-only
+    - AGPL-1.0-or-later
+    - AGPL-3.0
+    - AGPL-3.0-only
+    - AGPL-3.0-or-later
+
+  # Restricted licenses — scan will flag these as HIGH.
+  # Strong copyleft: source disclosure required for derivative works.
+  restricted:
+    - GPL-2.0
+    - GPL-2.0-only
+    - GPL-2.0-or-later
+    - GPL-3.0
+    - GPL-3.0-only
+    - GPL-3.0-or-later
+    - SSPL-1.0
+    - BSL-1.1
+    - EUPL-1.1
+    - EUPL-1.2
+
+  # Notice: LGPL is NOT restricted. Dynamic linking (how Node.js uses
+  # native deps like sharp/libvips) satisfies LGPL requirements.
+  # LGPL packages will be reported at LOW severity only.
+
+  # Confidence threshold for license detection (0.0 - 1.0).
+  confidence-level: 0.8
+
+  # Full scan: check all files, not just package manifests.
+  full: true
+
+# ─────────────────────────────────────────────
+# Misconfiguration Scanning
+# ─────────────────────────────────────────────
+
+misconfiguration:
+  # Scan Dockerfiles, Kubernetes manifests, Terraform, CloudFormation, etc.
+  # Trivy auto-detects IaC file types.
+
+  # Include checks that are informational / best-practice level.
+  include-non-failures: false
+
+  # Custom policy directory for OPA Rego policies.
+  # policy:
+  #   - /etc/trivy/policies
+
+# ─────────────────────────────────────────────
+# Secret Scanning
+# ─────────────────────────────────────────────
+
+secret:
+  # Use built-in secret detection rules.
+  # Additional rules can be added via custom config.
+  # config: /etc/trivy/secret-config.yaml
+
+# ─────────────────────────────────────────────
+# Cache Configuration
+# ─────────────────────────────────────────────
+
+cache:
+  # Cache directory for vulnerability database and scan results.
+  dir: /tmp/trivy-cache
+
+  # Cache backend. Use 'fs' for local filesystem (default).
+  backend: fs
+
+  # TTL for cached vulnerability DB (default: 12 hours).
+  # Shorter TTL = fresher data but slower scans.
+  # ttl: 12h
+
+# ─────────────────────────────────────────────
+# Database Settings
+# ─────────────────────────────────────────────
+
+db:
+  # Skip database update check (use cached DB).
+  # Set to true in air-gapped or offline environments.
+  skip-update: false
+
+  # Download DB only, don't scan (for pre-warming cache).
+  download-only: false
+
+  # Vulnerability database repository.
+  repository: ghcr.io/aquasecurity/trivy-db
+
+  # Java vulnerability database repository.
+  java-repository: ghcr.io/aquasecurity/trivy-java-db
+
+# ─────────────────────────────────────────────
+# Scan Target Configuration
+# ─────────────────────────────────────────────
+
+# Skip specific directories during scanning.
+skip-dirs:
+  - node_modules
+  - .git
+  - vendor
+  - __pycache__
+  - .tox
+  - .mypy_cache
+  - .pytest_cache
+  - dist
+  - build
+  - .next
+  - .nuxt
+
+# Skip specific files.
+skip-files:
+  - "**/*.test.js"
+  - "**/*.spec.js"
+  - "**/*.test.ts"
+  - "**/*.spec.ts"
+
+# ─────────────────────────────────────────────
+# Reporting
+# ─────────────────────────────────────────────
+
+# Show only packages with vulnerabilities (reduces noise).
+pkg-types:
+  - os
+  - library
+
+# List all packages even if no vulnerabilities found (useful for SBOM).
+list-all-pkgs: false
+
+# ─────────────────────────────────────────────
+# Performance
+# ─────────────────────────────────────────────
+
+# Timeout for the entire scan operation.
+timeout: 10m0s
+
+# Disable progress bar for non-interactive environments.
+# no-progress: true
+
+# Offline mode — don't download DB updates.
+# offline-scan: false

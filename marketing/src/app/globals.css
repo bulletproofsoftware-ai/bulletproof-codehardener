@@ -1,0 +1,282 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* CSS Custom Properties */
+:root {
+  /* Primary - Electric Blue/Cyan */
+  --primary-50: #ecfeff;
+  --primary-100: #cffafe;
+  --primary-200: #a5f3fc;
+  --primary-300: #67e8f9;
+  --primary-400: #22d3ee;
+  --primary-500: #06b6d4;
+  --primary-600: #0891b2;
+  --primary-700: #0e7490;
+  --primary-800: #155e75;
+  --primary-900: #164e63;
+
+  /* Accent - Purple/Violet */
+  --accent-500: #8b5cf6;
+  --accent-600: #7c3aed;
+
+  /* Backgrounds (Dark Theme) */
+  --bg-primary: #0a0a0a;
+  --bg-secondary: #111111;
+  --bg-tertiary: #1a1a1a;
+  --bg-hover: #262626;
+
+  /* Borders */
+  --border-primary: #262626;
+  --border-secondary: #333333;
+  --border-focus: #06b6d4;
+
+  /* Text */
+  --text-primary: #fafafa;
+  --text-secondary: #a1a1aa;
+  --text-tertiary: #71717a;
+
+  /* Status */
+  --success: #22c55e;
+  --warning: #eab308;
+  --error: #ef4444;
+  --info: #3b82f6;
+
+  /* Gradient */
+  --gradient-brand: linear-gradient(135deg, #06b6d4 0%, #8b5cf6 100%);
+}
+
+/* Base styles */
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Focus styles */
+:focus-visible {
+  outline: 2px solid var(--primary-500);
+  outline-offset: 2px;
+}
+
+/* Skip link for accessibility - WCAG AA compliant contrast */
+.skip-link {
+  position: absolute;
+  top: -40px;
+  left: 0;
+  background: var(--primary-800); /* Dark teal #155e75 for 4.5:1+ contrast with white */
+  color: white;
+  padding: 0.5rem 1rem;
+  z-index: 100;
+  transition: top 0.2s;
+  border-radius: 0 0 0.25rem 0;
+}
+
+.skip-link:focus {
+  top: 0;
+  outline: 2px solid var(--primary-400);
+  outline-offset: 2px;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-secondary);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-secondary);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-tertiary);
+}
+
+/* Selection */
+::selection {
+  background-color: rgba(6, 182, 212, 0.3);
+  color: var(--text-primary);
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  html {
+    scroll-behavior: auto;
+  }
+}
+
+/* Component base styles */
+@layer components {
+  /* Buttons */
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 px-6 py-3 text-sm font-medium text-white rounded-lg transition-all duration-200 min-h-[44px];
+    background: var(--gradient-brand);
+  }
+
+  .btn-primary:hover:not(:disabled) {
+    @apply opacity-90 -translate-y-0.5;
+    box-shadow: 0 4px 12px rgba(6, 182, 212, 0.3);
+  }
+
+  .btn-primary:active:not(:disabled) {
+    @apply translate-y-0;
+    box-shadow: 0 2px 6px rgba(6, 182, 212, 0.2);
+  }
+
+  .btn-primary:disabled {
+    @apply opacity-50 cursor-not-allowed;
+  }
+
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 px-6 py-3 text-sm font-medium rounded-lg transition-all duration-200 min-h-[44px];
+    @apply bg-transparent text-text-primary border border-border-secondary;
+  }
+
+  .btn-secondary:hover:not(:disabled) {
+    @apply bg-bg-hover border-primary-500 text-primary-400;
+  }
+
+  .btn-secondary:disabled {
+    @apply opacity-50 cursor-not-allowed;
+  }
+
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium rounded-lg transition-all duration-200;
+    @apply bg-transparent text-text-secondary;
+  }
+
+  .btn-ghost:hover {
+    @apply text-text-primary bg-bg-hover;
+  }
+
+  /* Cards */
+  .card {
+    @apply bg-bg-secondary border border-border-primary rounded-xl p-6 transition-all duration-200;
+  }
+
+  .card:hover {
+    @apply border-border-secondary;
+  }
+
+  .card-interactive {
+    @apply card cursor-pointer;
+  }
+
+  .card-interactive:hover {
+    @apply border-border-secondary bg-bg-tertiary -translate-y-0.5;
+    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.2);
+  }
+
+  /* Inputs */
+  .input {
+    @apply w-full px-4 py-3 text-sm rounded-lg transition-all duration-200 min-h-[44px];
+    @apply bg-bg-secondary border border-border-primary text-text-primary;
+  }
+
+  .input::placeholder {
+    @apply text-text-tertiary;
+  }
+
+  .input:hover:not(:disabled):not(:focus) {
+    @apply border-border-secondary;
+  }
+
+  .input:focus {
+    @apply outline-none border-primary-500;
+    box-shadow: 0 0 0 3px rgba(6, 182, 212, 0.15);
+  }
+
+  .input:disabled {
+    @apply bg-bg-tertiary text-text-tertiary cursor-not-allowed opacity-60;
+  }
+
+  .input.error {
+    @apply border-error;
+    box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.1);
+  }
+
+  /* Links */
+  .link {
+    @apply text-primary-500 transition-colors duration-200;
+  }
+
+  .link:hover {
+    @apply text-primary-400 underline;
+  }
+
+  /* Text gradient */
+  .text-gradient {
+    background: var(--gradient-brand);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  /* Container */
+  .container {
+    @apply max-w-7xl mx-auto px-6;
+  }
+
+  /* Section spacing */
+  .section {
+    @apply py-16 md:py-24;
+  }
+
+  /* Nav link */
+  .nav-link {
+    @apply text-sm font-medium text-text-secondary transition-colors duration-150;
+  }
+
+  .nav-link:hover,
+  .nav-link.active {
+    @apply text-text-primary;
+  }
+
+  .nav-link.active {
+    @apply text-primary-500;
+  }
+}
+
+/* Skeleton loading animation */
+@keyframes skeleton-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.skeleton {
+  @apply bg-bg-tertiary rounded;
+  animation: skeleton-pulse 1.5s ease-in-out infinite;
+}
+
+/* Hero gradient background */
+.bg-hero-gradient {
+  background: radial-gradient(ellipse at top, rgba(6, 182, 212, 0.15) 0%, transparent 50%),
+              radial-gradient(ellipse at bottom right, rgba(139, 92, 246, 0.1) 0%, transparent 50%),
+              var(--bg-primary);
+}
+
+/* Grid pattern overlay */
+.bg-grid-pattern {
+  background-image: linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+                    linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+  background-size: 64px 64px;
+}

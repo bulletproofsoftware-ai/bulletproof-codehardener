@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "codehardener": {
+      "command": "node",
+      "args": ["backend/dist/mcp-server.js"],
+      "env": {
+        "DATABASE_URL": "postgresql://codehardener:YOUR_PASSWORD@localhost:5432/codehardener",
+        "REDIS_URL": "redis://localhost:6379",
+        "DEFECTDOJO_ENABLED": "false",
+        "N8N_ENABLED": "false"
+      }
+    }
+  }
+}

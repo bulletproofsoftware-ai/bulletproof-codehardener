@@ -1,0 +1,120 @@
+{
+  "name": "Code Hardener - Post-Scan Processor",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "post-scan",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "ps-webhook-trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [220, 300],
+      "webhookId": "aih-post-scan"
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.BACKEND_URL || 'http://backend:4000' }}/internal/policies/evaluate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ projectId: $json.projectId, scanId: $json.scanId, findings: $json.findings }) }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Internal-API-Key",
+              "value": "={{ $env.INTERNAL_API_KEY }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "evaluate-policies",
+      "name": "Evaluate Policies",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [440, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "critical-check",
+              "leftValue": "={{ $json.shouldBlock }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "check-block",
+      "name": "Policy Blocked?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [660, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.BACKEND_URL || 'http://backend:4000' }}/internal/attestations/create",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ scanId: $json.scanId, projectId: $json.projectId, predicate: { policyResult: $json.passed ? 'pass' : 'fail', violations: $json.violations } }) }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Internal-API-Key",
+              "value": "={{ $env.INTERNAL_API_KEY }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "create-attestation",
+      "name": "Create Attestation",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [880, 460]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { status: 'blocked', message: 'Policy violations detected', violations: $input.first().json.violations } }];"
+      },
+      "id": "blocked-response",
+      "name": "Blocked Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [880, 140]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { status: 'completed', attestationCreated: true, policyPassed: true } }];"
+      },
+      "id": "success-response",
+      "name": "Success Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1100, 460]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": { "main": [[{ "node": "Evaluate Policies", "type": "main", "index": 0 }]] },
+    "Evaluate Policies": { "main": [[{ "node": "Policy Blocked?", "type": "main", "index": 0 }]] },
+    "Policy Blocked?": {
+      "main": [
+        [{ "node": "Blocked Response", "type": "main", "index": 0 }],
+        [{ "node": "Create Attestation", "type": "main", "index": 0 }]
+      ]
+    },
+    "Create Attestation": { "main": [[{ "node": "Success Response", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "tags": [{ "name": "codehardener" }, { "name": "post-scan" }],
+  "active": true
+}

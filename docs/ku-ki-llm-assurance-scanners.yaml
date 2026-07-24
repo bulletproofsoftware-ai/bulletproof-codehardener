@@ -1,0 +1,13 @@
+project: "llm-assurance-scanners"
+generated_at: "2026-06-05T17:45:00Z"
+cold_start: true
+note: "Insufficient data — only 6 Gemini validations available in the analysis window (threshold: 10). All 6 were PASS/PASS_AFTER_REMEDIATION with 97-100% completion; n-gram correlation is undefined over a unanimous-pass window. Extraction skipped. Re-run after 4+ additional workflow validations accumulate on this project."
+window:
+  validations_analyzed: 6
+  pass_count: 6
+  fail_count: 0
+  partial_count: 0
+  baseline_pass_rate: 1.00
+  scope: "current_workflow"
+ku_phrases: []
+ki_phrases: []

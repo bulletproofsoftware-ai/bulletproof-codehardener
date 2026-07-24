@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "codehardener"
+version = "0.1.0"
+description = "Official Python SDK for Code Hardener — security scanning API"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.9"
+dependencies = ["httpx>=0.24"]
+keywords = ["security", "scanning", "sast", "dast", "sca", "devsecops"]
+
+[project.urls]
+Homepage = "https://codehardener.com"
+Repository = "https://github.com/codehardener/codehardener"
+
+[tool.setuptools.packages.find]
+include = ["codehardener*"]

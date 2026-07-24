@@ -1,0 +1,48 @@
+# Dependencies
+node_modules/
+
+# Downloaded OSS scanner packages (install via: nuclei -update-templates)
+nuclei-templates/
+backend/templates/nuclei/
+
+# Environment files (see .env.example for template)
+.env
+.env.local
+.env.*.local
+backend/.env
+dashboard/.env.local
+
+# Build outputs
+dist/
+.next/
+*.tsbuildinfo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# MCP config files (see *.example.json for templates)
+mcp-config.json
+.cursor/mcp.json
+
+# IDE / AI tool sessions
+.claude/sessions/
+.idea/
+.vscode/
+.firecrawl/
+.conductor/
+conductor-last-status.txt
+conductor-state.*.bak
+
+# Test artifacts
+test-results/
+coverage/
+*.lcov
+.playwright-mcp/
+
+# Scan result artifacts (regenerated on each run)
+reports/*.json
+reports/nuclei/
+
+# Archives
+archive/

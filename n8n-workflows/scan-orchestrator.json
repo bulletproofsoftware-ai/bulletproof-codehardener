@@ -1,0 +1,117 @@
+{
+  "name": "Code Hardener - Scan Orchestrator",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "scan-orchestrator",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "so-webhook-trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [220, 300],
+      "webhookId": "aih-scan-orchestrator"
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.BACKEND_URL || 'http://backend:4000' }}/internal/projects/{{ $json.projectId }}/config",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Internal-API-Key",
+              "value": "={{ $env.INTERNAL_API_KEY }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "get-project-config",
+      "name": "Get Project Config",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [440, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Resolve scanners based on profile\nconst input = $input.first().json;\nconst profile = input.body?.profile || 'standard';\n\nconst profiles = {\n  quick: ['gitleaks', 'trivy'],\n  standard: ['trivy', 'gitleaks', 'opengrep', 'checkov', 'grype', 'syft', 'detect-secrets'],\n  comprehensive: ['opengrep', 'bandit', 'gosec', 'eslint-security', 'pmd', 'nuclei', 'trivy', 'grype', 'gitleaks', 'detect-secrets', 'checkov', 'syft', 'cosign', 'opa', 'conftest']\n};\n\nconst requestedScanners = input.body?.scanners;\nconst scanners = requestedScanners?.length > 0 ? requestedScanners : (profiles[profile] || profiles.standard);\n\n// Split into batches of 5 for parallel execution\nconst batchSize = 5;\nconst batches = [];\nfor (let i = 0; i < scanners.length; i += batchSize) {\n  batches.push(scanners.slice(i, i + batchSize));\n}\n\nreturn batches.map((batch, idx) => ({\n  json: {\n    batchIndex: idx,\n    scanners: batch,\n    scanId: input.body?.scanId,\n    projectId: input.body?.projectId,\n    userId: input.body?.userId,\n    profile,\n    branch: input.body?.branch || 'main'\n  }\n}));"
+      },
+      "id": "resolve-scanners",
+      "name": "Resolve Scanners",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [660, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Execute each scanner in the batch via backend API\nconst batch = $input.first().json;\nconst results = [];\n\nfor (const scanner of batch.scanners) {\n  try {\n    const response = await this.helpers.httpRequest({\n      method: 'POST',\n      url: `${process.env.BACKEND_URL || 'http://backend:4000'}/internal/scanners/execute`,\n      headers: { 'X-Internal-API-Key': process.env.INTERNAL_API_KEY, 'Content-Type': 'application/json' },\n      body: {\n        scanId: batch.scanId,\n        projectId: batch.projectId,\n        userId: batch.userId,\n        scanner,\n        branch: batch.branch,\n        profile: batch.profile\n      },\n      timeout: 300000\n    });\n    results.push(response);\n  } catch (error) {\n    results.push({ scanner, success: false, error: error.message, findings: [], duration: 0 });\n  }\n}\n\nreturn [{ json: { batchIndex: batch.batchIndex, results, scanId: batch.scanId, projectId: batch.projectId } }];"
+      },
+      "id": "execute-scanners",
+      "name": "Execute Scanner Batch",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [880, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Aggregate all batch results\nconst allResults = [];\nfor (const item of $input.all()) {\n  if (item.json.results) {\n    allResults.push(...item.json.results);\n  }\n}\n\nconst scanId = $input.first().json.scanId;\nconst projectId = $input.first().json.projectId;\n\n// Calculate totals\nlet totalFindings = { critical: 0, high: 0, medium: 0, low: 0, info: 0, total: 0 };\nlet totalDuration = 0;\n\nfor (const result of allResults) {\n  totalDuration += result.duration || 0;\n  for (const f of result.findings || []) {\n    totalFindings[f.severity] = (totalFindings[f.severity] || 0) + 1;\n    totalFindings.total++;\n  }\n}\n\nreturn [{\n  json: {\n    scanId,\n    projectId,\n    results: allResults,\n    totalFindings,\n    totalDuration,\n    scannersRun: allResults.length,\n    successful: allResults.filter(r => r.success).length\n  }\n}];"
+      },
+      "id": "aggregate-results",
+      "name": "Aggregate Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1100, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.BACKEND_URL || 'http://backend:4000' }}/internal/findings/import",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ scanId: $json.scanId, projectId: $json.projectId, results: $json.results, duration: $json.totalDuration }) }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Internal-API-Key",
+              "value": "={{ $env.INTERNAL_API_KEY }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "import-findings",
+      "name": "Import Findings to Backend",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1320, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\nreturn [{ json: { executionId: $execution.id, scanId: input.scanId, status: 'completed', imported: input.imported } }];"
+      },
+      "id": "respond",
+      "name": "Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1540, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": { "main": [[{ "node": "Get Project Config", "type": "main", "index": 0 }]] },
+    "Get Project Config": { "main": [[{ "node": "Resolve Scanners", "type": "main", "index": 0 }]] },
+    "Resolve Scanners": { "main": [[{ "node": "Execute Scanner Batch", "type": "main", "index": 0 }]] },
+    "Execute Scanner Batch": { "main": [[{ "node": "Aggregate Results", "type": "main", "index": 0 }]] },
+    "Aggregate Results": { "main": [[{ "node": "Import Findings to Backend", "type": "main", "index": 0 }]] },
+    "Import Findings to Backend": { "main": [[{ "node": "Response", "type": "main", "index": 0 }]] }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [{ "name": "codehardener" }, { "name": "scan" }],
+  "active": true
+}

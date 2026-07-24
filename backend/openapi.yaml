@@ -1,0 +1,300 @@
+openapi: 3.1.0
+info:
+  title: Code Hardener API
+  version: 2.0.0
+  description: Security assurance platform API with 70+ integrated scanners
+servers:
+  - url: http://localhost:7002/api/v1
+    description: Local development
+  - url: https://scan.codehardener.com/api/v1
+    description: Production
+paths:
+  /projects:
+    get:
+      summary: List projects
+      tags: [Projects]
+      responses:
+        '200':
+          description: Project list
+    post:
+      summary: Create project
+      tags: [Projects]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                repositoryUrl: { type: string }
+                targetUrl: { type: string }
+                containerImage: { type: string }
+                openapiSpecPath: { type: string }
+              required: [name]
+      responses:
+        '201':
+          description: Project created
+  /projects/{id}:
+    get:
+      summary: Get project
+      tags: [Projects]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Project details
+    patch:
+      summary: Update project
+      tags: [Projects]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Project updated
+    delete:
+      summary: Delete project
+      tags: [Projects]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204':
+          description: Project deleted
+  /scans:
+    get:
+      summary: List scans
+      tags: [Scans]
+      parameters:
+        - name: projectId
+          in: query
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Scan list
+    post:
+      summary: Start a scan
+      tags: [Scans]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                projectId: { type: string, format: uuid }
+                profile: { type: string, enum: [quick, standard, comprehensive, security, api, performance, frontend, supply-chain, ai-security, ai-code-quality, database, chaos, pr, pre-commit, compliance, usability, unit-test, full] }
+                scanners: { type: array, items: { type: string } }
+              required: [projectId]
+      responses:
+        '201':
+          description: Scan queued
+  /scans/{id}:
+    get:
+      summary: Get scan details
+      tags: [Scans]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Scan details with scanner results
+  /findings:
+    get:
+      summary: List findings
+      tags: [Findings]
+      parameters:
+        - name: scanId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: projectId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: status
+          in: query
+          schema: { type: string, enum: [open, fixed, ignored, false_positive, deferred] }
+        - name: severity
+          in: query
+          schema: { type: string, enum: [critical, high, medium, low, info] }
+        - name: scanner
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 20 }
+      responses:
+        '200':
+          description: Finding list
+  /findings/{id}:
+    get:
+      summary: Get finding details
+      tags: [Findings]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Finding details
+    patch:
+      summary: Update finding status
+      tags: [Findings]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status: { type: string, enum: [open, fixed, ignored, false_positive, deferred] }
+      responses:
+        '200':
+          description: Finding updated
+  /suppressions:
+    get:
+      summary: List suppressions
+      tags: [Suppressions]
+      responses:
+        '200':
+          description: Suppression list
+    post:
+      summary: Create suppression
+      tags: [Suppressions]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                projectId: { type: string, format: uuid }
+                matchType: { type: string, enum: [rule_id, scanner, cwe, title_pattern] }
+                matchValue: { type: string }
+                reason: { type: string }
+              required: [projectId, matchType, matchValue]
+      responses:
+        '201':
+          description: Suppression created
+  /reports:
+    post:
+      summary: Generate report
+      tags: [Reports]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title: { type: string }
+                reportType: { type: string, enum: [security_summary, compliance, vulnerability, executive, scan_detail] }
+                format: { type: string, enum: [pdf, html, json, csv, markdown, sarif] }
+                projectId: { type: string, format: uuid }
+                scanId: { type: string, format: uuid }
+      responses:
+        '201':
+          description: Report generated
+  /attestations:
+    get:
+      summary: List attestations
+      tags: [Attestations]
+      responses:
+        '200':
+          description: Attestation list
+  /attestations/{id}:
+    get:
+      summary: Get attestation
+      tags: [Attestations]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Attestation details
+  /tools:
+    get:
+      summary: List available scanner tools
+      tags: [Tools]
+      responses:
+        '200':
+          description: Tool list with categories and status
+  /test-generator/analyze-code:
+    post:
+      summary: Analyze code for test generation
+      tags: [Test Generator]
+      responses:
+        '200':
+          description: Code analysis results
+  /test-generator/generate:
+    post:
+      summary: Generate test cases
+      tags: [Test Generator]
+      responses:
+        '200':
+          description: Generated test cases
+  /auth/register:
+    post:
+      summary: Register new user
+      tags: [Auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email: { type: string, format: email }
+                password: { type: string, minLength: 8 }
+                name: { type: string }
+              required: [email, password, name]
+      responses:
+        '201':
+          description: User registered
+  /auth/login:
+    post:
+      summary: Login
+      tags: [Auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email: { type: string, format: email }
+                password: { type: string }
+              required: [email, password]
+      responses:
+        '200':
+          description: Login successful with tokens
+security:
+  - devHeader: []
+  - bearerAuth: []
+components:
+  securitySchemes:
+    devHeader:
+      type: apiKey
+      in: header
+      name: X-User-Id
+      description: Dev mode auth bypass
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT

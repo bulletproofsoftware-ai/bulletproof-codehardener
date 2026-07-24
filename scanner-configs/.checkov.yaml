@@ -1,0 +1,129 @@
+# Code Hardener - Checkov Configuration
+# Infrastructure-as-Code security scanning across multiple frameworks.
+# Reference: https://www.checkov.io/2.Basics/CLI%20Command%20Reference.html
+
+# ─────────────────────────────────────────────
+# Framework Selection
+# ─────────────────────────────────────────────
+
+# Scan all supported IaC frameworks.
+framework:
+  - terraform
+  - cloudformation
+  - kubernetes
+  - dockerfile
+  - helm
+  - serverless
+  - arm
+  - bicep
+  - kustomize
+  - github_actions
+  - gitlab_ci
+  - bitbucket_pipelines
+
+# ─────────────────────────────────────────────
+# Output Configuration
+# ─────────────────────────────────────────────
+
+# Compact output — show only failed checks.
+compact: true
+
+# Output format (overridden per-scan by the scanner adapter).
+output: json
+
+# Don't show guide URLs in output (cleaner for programmatic parsing).
+no-guide: true
+
+# ─────────────────────────────────────────────
+# Check Exclusions
+# ─────────────────────────────────────────────
+
+# Skip checks that produce excessive false positives in containerized environments.
+# Each exclusion is documented with rationale.
+skip-check:
+  # Dockerfile checks — common false positives in multi-stage builds:
+  - CKV_DOCKER_3     # Ensure HEALTHCHECK — not always needed for sidecar/init containers
+  - CKV_DOCKER_7     # Ensure FROM uses specific version tag — handled by Trivy vuln scan
+  - CKV_DOCKER_8     # Ensure USER is not root — sometimes required for package installation stage
+
+  # Kubernetes checks — legitimate patterns in scanner workloads:
+  - CKV_K8S_22       # Use read-only filesystem — scanners need write access to temp dirs
+  - CKV_K8S_28       # Ensure writable hostPath — scanner volumes need write access
+  - CKV_K8S_40       # Ensure containers don't run as high UID — scanner base images
+
+  # Terraform checks — acceptable in dev/staging:
+  - CKV_AWS_144      # Ensure S3 bucket cross-region replication — cost-prohibitive for non-prod
+  - CKV_AWS_145      # Ensure S3 bucket encrypted with CMK — SSE-S3 sufficient for most use cases
+
+  # GitHub Actions checks:
+  - CKV_GHA_7        # Ensure actions are pinned to SHA — impractical for all dependencies
+
+# ─────────────────────────────────────────────
+# Directory Configuration
+# ─────────────────────────────────────────────
+
+# Directories to skip during scanning.
+skip-path:
+  - node_modules
+  - .git
+  - vendor
+  - __pycache__
+  - .terraform
+  - .terragrunt-cache
+  - dist
+  - build
+  - coverage
+  - test
+  - tests
+  - __tests__
+  - spec
+  - fixtures
+  - mocks
+
+# External custom checks directory.
+# Uncomment when custom checks are added.
+# external-checks-dir:
+#   - /etc/checkov/custom-checks
+
+# ─────────────────────────────────────────────
+# Severity & Filtering
+# ─────────────────────────────────────────────
+
+# Minimum severity to report.
+check-severity:
+  - CRITICAL
+  - HIGH
+  - MEDIUM
+  - LOW
+
+# Soft fail — don't exit with error code on findings.
+# Set to false for strict enforcement in CI gates.
+soft-fail: true
+
+# ─────────────────────────────────────────────
+# Secrets Scanning
+# ─────────────────────────────────────────────
+
+# Enable secrets scanning within IaC files.
+enable-secret-scan-all-files: true
+
+# ─────────────────────────────────────────────
+# Performance
+# ─────────────────────────────────────────────
+
+# Parallelism for scanning multiple files.
+parallelism: 4
+
+# Download external modules/providers for Terraform scanning.
+download-external-modules: true
+
+# Variable evaluation depth.
+var-file: []
+
+# ─────────────────────────────────────────────
+# Baseline
+# ─────────────────────────────────────────────
+
+# Baseline file to suppress known/accepted findings.
+# Uncomment when baseline is established.
+# baseline: .checkov.baseline

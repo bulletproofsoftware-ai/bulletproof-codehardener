@@ -1,0 +1,80 @@
+{
+  "name": "Pull Request Open → Code Hardener Full Scan",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "pr-open-scan",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "trigger-pr",
+      "name": "Webhook (pull_request)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [240, 300],
+      "webhookId": "pr-open-scan"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "is-opened-or-synced",
+              "leftValue": "={{$json.body?.action || $json.action}}",
+              "rightValue": "opened,reopened,synchronize",
+              "operator": { "type": "string", "operation": "regex" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "filter-action",
+      "name": "Only opened/reopened/sync",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $json.body || $json;\nconst pr = body.pull_request || {};\nconst projectId = body.repository?.full_name || pr.base?.repo?.full_name || 'unknown';\nconst branch = pr.head?.ref || 'unknown';\nconst userId = pr.user?.login || body.sender?.login || 'system';\n\nreturn {\n  scanId: `pr-${projectId.replace(/[^a-z0-9]/gi,'_')}-${pr.number || 0}-${Date.now()}`,\n  projectId,\n  userId,\n  scanner: 'all',\n  branch,\n  profile: 'full',\n  pr_number: pr.number,\n  trigger: 'git.pr_open'\n};"
+      },
+      "id": "normalize-pr",
+      "name": "Normalize PR payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://codehardener-backend-1:4000/internal/scanners/execute",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "x-internal-api-key", "value": "={{$env.CODEHARDENER_INTERNAL_API_KEY || 'dev-internal-key-change-in-production'}}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": { "timeout": 120000 }
+      },
+      "id": "call-full-scan",
+      "name": "Execute full scan",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [900, 200]
+    }
+  ],
+  "connections": {
+    "Webhook (pull_request)": { "main": [[{ "node": "Only opened/reopened/sync", "type": "main", "index": 0 }]] },
+    "Only opened/reopened/sync": { "main": [[{ "node": "Normalize PR payload", "type": "main", "index": 0 }], []] },
+    "Normalize PR payload": { "main": [[{ "node": "Execute full scan", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "active": false
+}

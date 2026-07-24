@@ -1,0 +1,293 @@
+# Code Hardener - Self-Contained Security Platform
+# Usage: docker compose up -d
+# Core services: postgres, redis, backend, scanner, n8n, init, dashboard
+# Optional profiles: defectdojo, marketing
+
+services:
+  # ============================================================
+  # PostgreSQL - Single instance, 3 databases (codehardener, defectdojo, n8n)
+  # ============================================================
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: codehardener
+      POSTGRES_USER: codehardener
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-codehardener_dev}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/pg-create-databases.sh:/docker-entrypoint-initdb.d/00-create-dbs.sh
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/01-schema.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U codehardener"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - codehardener
+
+  # ============================================================
+  # Redis - Queue + cache
+  # ============================================================
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - codehardener
+
+  # ============================================================
+  # Backend API + MCP SSE endpoint
+  # ============================================================
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV: development
+      PORT: 4000
+      HOST: 0.0.0.0
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: codehardener
+      DB_USER: codehardener
+      DB_PASSWORD: ${DB_PASSWORD:-codehardener_dev}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change-in-production}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000,http://localhost:3001}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DEFECTDOJO_URL: http://defectdojo:8080
+      DEFECTDOJO_API_KEY: ${DEFECTDOJO_API_KEY:-}
+      DEFECTDOJO_ENABLED: ${DEFECTDOJO_ENABLED:-false}
+      N8N_URL: http://n8n:5678
+      N8N_ENABLED: ${N8N_ENABLED:-false}
+      N8N_WEBHOOK_BASE: http://n8n:5678/webhook
+      N8N_API_KEY: ${N8N_API_KEY:?Set N8N_API_KEY in .env}
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY:?Set INTERNAL_API_KEY in .env}
+      SIGNING_KEYS_DIR: /data/keys
+      # LLM Assurance (defending-code-reference-harness integration) — unset = stages skip with no_llm_api_key
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      LLM_THREATMODEL_MAX_TOKENS: ${LLM_THREATMODEL_MAX_TOKENS:-150000}
+      LLM_SCAN_MAX_TOTAL_TOKENS: ${LLM_SCAN_MAX_TOTAL_TOKENS:-2000000}
+    ports:
+      - "${BACKEND_PORT:-7002}:4000"
+    volumes:
+      - signing_keys:/data/keys
+      - ${LOCAL_CODE_DIR:-~/Code}:/repos
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:4000/health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    networks:
+      - codehardener
+
+  # ============================================================
+  # Scanner Worker - 27 security tools installed
+  # ============================================================
+  scanner:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.scanner
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: codehardener
+      DB_USER: codehardener
+      DB_PASSWORD: ${DB_PASSWORD:-codehardener_dev}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      SCANNER_TIMEOUT_MS: 300000
+      SCANNER_MAX_CONCURRENT: 5
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY:?Set INTERNAL_API_KEY in .env}
+      # LLM Assurance (defending-code-reference-harness integration) — unset = stages skip with no_llm_api_key
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      LLM_THREATMODEL_MAX_TOKENS: ${LLM_THREATMODEL_MAX_TOKENS:-150000}
+      LLM_SCAN_MAX_TOTAL_TOKENS: ${LLM_SCAN_MAX_TOTAL_TOKENS:-2000000}
+    volumes:
+      - scan_targets:/scan-target
+      - scan_results:/scan-results
+      - ./scanner-configs:/configs:ro
+      - ./nuclei-templates:/nuclei-templates:ro
+      # Mount host code directory so file:// URLs resolve inside the container
+      - ${LOCAL_CODE_DIR:-~/Code}:/host-code:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 4G
+    networks:
+      - codehardener
+
+  # ============================================================
+  # n8n - Workflow automation backbone (own instance)
+  # ============================================================
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:latest
+    restart: unless-stopped
+    environment:
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: postgres
+      DB_POSTGRESDB_PORT: 5432
+      DB_POSTGRESDB_DATABASE: n8n
+      DB_POSTGRESDB_USER: codehardener
+      DB_POSTGRESDB_PASSWORD: ${DB_PASSWORD:-codehardener_dev}
+      N8N_BASIC_AUTH_ACTIVE: "true"
+      N8N_BASIC_AUTH_USER: ${N8N_USER:-admin}
+      N8N_BASIC_AUTH_PASSWORD: ${N8N_PASSWORD:-codehardener}
+      N8N_HOST: 0.0.0.0
+      N8N_PORT: 5678
+      N8N_PROTOCOL: http
+      WEBHOOK_URL: http://n8n:5678/
+      N8N_API_KEY: ${N8N_API_KEY:?Set N8N_API_KEY in .env}
+      GENERIC_TIMEZONE: UTC
+      BACKEND_URL: http://backend:4000
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY:?Set INTERNAL_API_KEY in .env}
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./n8n-workflows:/home/node/workflows:ro
+    ports:
+      - "${N8N_PORT:-5678}:5678"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:5678/healthz || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    networks:
+      - codehardener
+
+  # ============================================================
+  # DefectDojo - Vulnerability management UI (optional)
+  # Enable: docker compose --profile defectdojo up -d
+  # Note: DefectDojo requires a multi-container setup (uwsgi+nginx+celery).
+  # This provides the Django app container. See docs/deployment.md for full setup.
+  # ============================================================
+  defectdojo:
+    image: defectdojo/defectdojo-django:latest
+    profiles: ["defectdojo"]
+    restart: unless-stopped
+    environment:
+      DD_DATABASE_URL: postgresql://codehardener:${DB_PASSWORD:-codehardener_dev}@postgres:5432/defectdojo
+      DD_SECRET_KEY: ${DD_SECRET_KEY:-defectdojo-secret-key-change-in-production}
+      DD_CREDENTIAL_AES_256_KEY: ${DD_AES_KEY:-defectdojo-aes-key-change-prod}
+      DD_ALLOWED_HOSTS: "*"
+      DD_DEBUG: "False"
+    ports:
+      - "${DEFECTDOJO_PORT:-8083}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/api/v2/ || exit 1"]
+      interval: 30s
+      timeout: 15s
+      retries: 10
+      start_period: 120s
+    networks:
+      - codehardener
+
+  # ============================================================
+  # Init - One-shot setup (migrations, workflow import)
+  # ============================================================
+  init:
+    image: postgres:16-alpine
+    entrypoint: ["/bin/sh", "/app/scripts/init-all.sh"]
+    environment:
+      DB_HOST: postgres
+      DB_USER: codehardener
+      DB_PASSWORD: ${DB_PASSWORD:-codehardener_dev}
+      DB_NAME: codehardener
+      N8N_URL: http://n8n:5678
+      N8N_USER: ${N8N_USER:-admin}
+      N8N_PASSWORD: ${N8N_PASSWORD:-codehardener}
+    volumes:
+      - ./postgres/migrations:/app/migrations:ro
+      - ./scripts:/app/scripts:ro
+      - ./n8n-workflows:/app/n8n-workflows:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+    networks:
+      - codehardener
+
+  # ============================================================
+  # Optional: Marketing site (profile: marketing)
+  # ============================================================
+  marketing:
+    build:
+      context: ./marketing
+      dockerfile: Dockerfile
+    profiles: ["marketing"]
+    environment:
+      NODE_ENV: production
+      NEXT_PUBLIC_API_URL: http://localhost:4000
+      NEXT_PUBLIC_DASHBOARD_URL: http://localhost:3001
+    ports:
+      - "3000:3000"
+    networks:
+      - codehardener
+
+  # ============================================================
+  # Dashboard - Next.js frontend
+  # ============================================================
+  dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:${BACKEND_PORT:-7002}/api/v1
+        NEXT_PUBLIC_DEV_MODE: "true"
+    environment:
+      NODE_ENV: production
+      API_URL: http://backend:4000
+      NEXT_PUBLIC_API_URL: http://localhost:${BACKEND_PORT:-7002}/api/v1
+    ports:
+      - "${DASHBOARD_PORT:-3001}:3000"
+    depends_on:
+      - backend
+    networks:
+      - codehardener
+
+networks:
+  codehardener:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
+  n8n_data:
+  scan_targets:
+  scan_results:
+  signing_keys:

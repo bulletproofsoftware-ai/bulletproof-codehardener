@@ -1,0 +1,80 @@
+{
+  "name": "Branch Create → Code Hardener Lightweight Scan",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "branch-create-scan",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "trigger-branch",
+      "name": "Webhook (create)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [240, 300],
+      "webhookId": "branch-create-scan"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "is-branch",
+              "leftValue": "={{$json.body?.ref_type || $json.ref_type}}",
+              "rightValue": "branch",
+              "operator": { "type": "string", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "filter-ref-type",
+      "name": "Only branch creates",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $json.body || $json;\nconst projectId = body.repository?.full_name || 'unknown';\nconst branch = body.ref || 'unknown';\nconst userId = body.sender?.login || 'system';\n\nreturn {\n  scanId: `branch-${projectId.replace(/[^a-z0-9]/gi,'_')}-${branch.replace(/[^a-z0-9]/gi,'_')}-${Date.now()}`,\n  projectId,\n  userId,\n  scanner: 'gitleaks',\n  branch,\n  profile: 'quick',\n  trigger: 'git.branch_create'\n};"
+      },
+      "id": "normalize-branch",
+      "name": "Normalize branch payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://codehardener-backend-1:4000/internal/scanners/execute",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "x-internal-api-key", "value": "={{$env.CODEHARDENER_INTERNAL_API_KEY || 'dev-internal-key-change-in-production'}}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": { "timeout": 30000 }
+      },
+      "id": "call-quick-scan",
+      "name": "Execute quick scan (gitleaks)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [900, 200]
+    }
+  ],
+  "connections": {
+    "Webhook (create)": { "main": [[{ "node": "Only branch creates", "type": "main", "index": 0 }]] },
+    "Only branch creates": { "main": [[{ "node": "Normalize branch payload", "type": "main", "index": 0 }], []] },
+    "Normalize branch payload": { "main": [[{ "node": "Execute quick scan (gitleaks)", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "active": false
+}

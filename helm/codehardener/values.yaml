@@ -1,0 +1,221 @@
+# Code Hardener Helm Chart Values
+# Override these values in your environment-specific values file.
+
+global:
+  imageRegistry: ""
+  imagePullSecrets: []
+
+# ============================================================================
+# Backend API
+# ============================================================================
+backend:
+  replicaCount: 2
+  image:
+    repository: codehardener/backend
+    tag: latest
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 4000
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+  env:
+    NODE_ENV: production
+    LOG_LEVEL: info
+    RATE_LIMIT_MAX_REQUESTS: "100"
+  envFrom:
+    - secretRef:
+        name: codehardener-secrets
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+
+# ============================================================================
+# Scanner Workers
+# ============================================================================
+scanner:
+  replicaCount: 1
+  image:
+    repository: codehardener/scanner
+    tag: latest
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: "2"
+      memory: 4Gi
+  env:
+    SCANNER_TIMEOUT_MS: "300000"
+    SCANNER_MAX_CONCURRENT: "3"
+  # KEDA autoscaling based on BullMQ queue depth
+  keda:
+    enabled: true
+    minReplicaCount: 0
+    maxReplicaCount: 20
+    pollingInterval: 15
+    cooldownPeriod: 300
+    triggers:
+      - type: redis
+        metadata:
+          listName: "bull:scan-queue:wait"
+          listLength: "5"
+  # gVisor runtime class for sandbox isolation
+  runtimeClassName: gvisor
+  # Security context for scan containers
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    readOnlyRootFilesystem: true
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+
+# ============================================================================
+# Dashboard (Next.js)
+# ============================================================================
+dashboard:
+  replicaCount: 2
+  image:
+    repository: codehardener/dashboard
+    tag: latest
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 3000
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 70
+
+# ============================================================================
+# n8n Workflow Engine
+# ============================================================================
+n8n:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: n8nio/n8n
+    tag: latest
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 5678
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+  persistence:
+    enabled: true
+    size: 10Gi
+    storageClass: ""
+
+# ============================================================================
+# PostgreSQL (via Bitnami subchart)
+# ============================================================================
+postgresql:
+  enabled: true
+  auth:
+    postgresPassword: ""  # Set via secret
+    username: codehardener
+    password: ""  # Set via secret
+    database: codehardener
+  primary:
+    resources:
+      requests:
+        cpu: 250m
+        memory: 256Mi
+      limits:
+        cpu: "1"
+        memory: 1Gi
+    persistence:
+      enabled: true
+      size: 20Gi
+  metrics:
+    enabled: true
+
+# ============================================================================
+# Redis (via Bitnami subchart)
+# ============================================================================
+redis:
+  enabled: true
+  architecture: standalone
+  auth:
+    enabled: true
+    password: ""  # Set via secret
+  master:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
+    persistence:
+      enabled: true
+      size: 5Gi
+
+# ============================================================================
+# Ingress
+# ============================================================================
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/rate-limit: "100"
+    nginx.ingress.kubernetes.io/rate-limit-window: "1m"
+  hosts:
+    - host: api.codehardener.com
+      paths:
+        - path: /
+          pathType: Prefix
+          service: backend
+    - host: app.codehardener.com
+      paths:
+        - path: /
+          pathType: Prefix
+          service: dashboard
+  tls:
+    - secretName: codehardener-tls
+      hosts:
+        - api.codehardener.com
+        - app.codehardener.com
+
+# ============================================================================
+# Network Policies
+# ============================================================================
+networkPolicy:
+  enabled: true
+
+# ============================================================================
+# Service Account
+# ============================================================================
+serviceAccount:
+  create: true
+  name: codehardener
+  annotations: {}

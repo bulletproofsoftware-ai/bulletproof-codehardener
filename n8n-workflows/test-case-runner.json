@@ -1,0 +1,70 @@
+{
+  "name": "Code Hardener - Test Case Runner",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "test-runner",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "tc-webhook-trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [220, 300],
+      "webhookId": "aih-test-runner"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ executionId: $execution.id, message: 'Test execution started' }) }}",
+        "options": {}
+      },
+      "id": "immediate-response",
+      "name": "Immediate Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [440, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Fetch test cases for the project\nconst projectId = $input.first().json.body?.projectId;\nconst testType = $input.first().json.body?.testType || 'all';\n\ntry {\n  const response = await this.helpers.httpRequest({\n    method: 'GET',\n    url: `${process.env.BACKEND_URL || 'http://backend:4000'}/api/v1/test-generator/project/${projectId}`,\n    headers: { 'X-Internal-API-Key': process.env.INTERNAL_API_KEY },\n    timeout: 10000\n  });\n  \n  const testCases = response.data || [];\n  const filtered = testType === 'all' ? testCases : testCases.filter(t => t.type === testType);\n  \n  return filtered.map(tc => ({ json: { ...tc, projectId } }));\n} catch (error) {\n  return [{ json: { error: error.message, projectId } }];\n}"
+      },
+      "id": "fetch-tests",
+      "name": "Fetch Test Cases",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [660, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Execute individual test case\nconst testCase = $input.first().json;\n\ntry {\n  const response = await this.helpers.httpRequest({\n    method: 'POST',\n    url: `${process.env.BACKEND_URL || 'http://backend:4000'}/internal/scanners/execute`,\n    headers: { 'X-Internal-API-Key': process.env.INTERNAL_API_KEY, 'Content-Type': 'application/json' },\n    body: {\n      scanId: testCase.projectId,\n      projectId: testCase.projectId,\n      userId: 'n8n-test-runner',\n      scanner: testCase.scanner || 'nuclei',\n      branch: 'main',\n      profile: 'quick'\n    },\n    timeout: 120000\n  });\n  \n  return [{ json: { testId: testCase.id, passed: response.success, result: response } }];\n} catch (error) {\n  return [{ json: { testId: testCase.id, passed: false, error: error.message } }];\n}"
+      },
+      "id": "run-test",
+      "name": "Run Test",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [880, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Aggregate test results\nconst results = $input.all().map(item => item.json);\nconst passed = results.filter(r => r.passed).length;\nconst failed = results.filter(r => !r.passed).length;\n\nreturn [{\n  json: {\n    summary: { total: results.length, passed, failed },\n    results\n  }\n}];"
+      },
+      "id": "tc-aggregate",
+      "name": "Aggregate Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1100, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": { "main": [[{ "node": "Immediate Response", "type": "main", "index": 0 }]] },
+    "Immediate Response": { "main": [[{ "node": "Fetch Test Cases", "type": "main", "index": 0 }]] },
+    "Fetch Test Cases": { "main": [[{ "node": "Run Test", "type": "main", "index": 0 }]] },
+    "Run Test": { "main": [[{ "node": "Aggregate Results", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "tags": [{ "name": "codehardener" }, { "name": "testing" }],
+  "active": true
+}

@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Hardener - The Assurance Layer for AI-Generated Code</title>
+    <meta name="description" content="70+ code quality, security, and testing tools. One platform. Zero configuration. The most comprehensive assurance platform for AI-first developers.">
+    <link rel="icon" type="image/png" href="images/CodeHardener.png">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+:root {
+    --primary: #1E3A5F;
+    --primary-light: #2A4F7F;
+    --accent: #3B82F6;
+    --accent-light: #60A5FA;
+    --success: #10B981;
+    --danger: #EF4444;
+    --warning: #F59E0B;
+    --bg: #FFFFFF;
+    --bg-alt: #F9FAFB;
+    --bg-hero: #F3F4F6;
+    --text: #111827;
+    --text-secondary: #4B5563;
+    --text-muted: #6B7280;
+    --border: #E5E7EB;
+    --badge-bg: #EBF0F7;
+    --shadow: 0 1px 3px rgba(0,0,0,0.1), 0 1px 2px rgba(0,0,0,0.06);
+    --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -2px rgba(0,0,0,0.05);
+}
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+html { scroll-behavior: smooth; }
+body { font-family: 'Inter', -apple-system, sans-serif; color: var(--text); background: var(--bg); line-height: 1.6; }
+a { color: inherit; text-decoration: none; }
+img { max-width: 100%; height: auto; }
+.container { max-width: 1200px; margin: 0 auto; padding: 0 1.5rem; }
+
+/* Nav */
+nav { position: fixed; top:0; left:0; right:0; z-index:100; background: rgba(255,255,255,0.95); backdrop-filter: blur(10px); border-bottom: 1px solid var(--border); }
+nav .container { display:flex; align-items:center; justify-content:space-between; height:72px; }
+.nav-logo { display:flex; align-items:center; gap:0.5rem; }
+.nav-logo img { height:42px; }
+.nav-links { display:flex; gap:2rem; }
+.nav-links a { font-size:0.9375rem; font-weight:500; color:var(--text-secondary); transition:color 0.2s; }
+.nav-links a:hover { color:var(--primary); }
+@media(max-width:768px) { .nav-links { display:none; } }
+
+/* Section helpers */
+.section { padding: 3rem 0; }
+.section-alt { background: var(--bg-alt); }
+.section-header { text-align:center; max-width:700px; margin:0 auto 2rem; }
+.section-badge { display:inline-block; background:var(--badge-bg); color:var(--primary); font-size:0.8125rem; font-weight:600; padding:0.35rem 1rem; border-radius:100px; margin-bottom:1rem; letter-spacing:0.05em; text-transform:uppercase; }
+.section-header h2 { font-size:2.25rem; font-weight:800; color:var(--text); margin-bottom:0.75rem; line-height:1.2; }
+.section-header p { font-size:1.125rem; color:var(--text-secondary); }
+
+/* Hero */
+.hero { padding: 6rem 0 3rem; background: linear-gradient(180deg, #F3F4F6 0%, #E8EDF4 60%, #FFFFFF 100%); text-align:center; position:relative; overflow:hidden; }
+.hero::before { content:''; position:absolute; top:-50%; left:-50%; width:200%; height:200%; background:radial-gradient(circle at 30% 50%, rgba(59,130,246,0.05) 0%, transparent 50%), radial-gradient(circle at 70% 50%, rgba(30,58,95,0.04) 0%, transparent 50%); pointer-events:none; }
+.hero .container { position:relative; z-index:1; }
+.hero-badge { display:inline-flex; align-items:center; gap:0.5rem; background:var(--bg); color:var(--primary); font-size:0.8125rem; font-weight:600; padding:0.4rem 1rem; border-radius:100px; margin-bottom:1.5rem; border:1px solid var(--border); box-shadow:var(--shadow); }
+.hero-badge::before { content:''; width:8px; height:8px; border-radius:50%; background:var(--success); animation:pulse 2s infinite; }
+@keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.5;transform:scale(1.3)} }
+.hero h1 { font-size:3.5rem; font-weight:800; color:var(--text); line-height:1.1; margin-bottom:1rem; }
+.hero h1 span { background:linear-gradient(135deg, var(--primary), var(--accent)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; }
+.hero p { font-size:1.25rem; color:var(--text-secondary); max-width:600px; margin:0 auto 1.5rem; }
+.hero-stats { display:flex; justify-content:center; gap:1.5rem; flex-wrap:wrap; margin-bottom:2rem; }
+.hero-stats > div { background:var(--bg); border:1px solid var(--border); border-radius:12px; padding:1rem 1.5rem; box-shadow:var(--shadow); min-width:140px; }
+.hero-stat-value { font-size:2.25rem; font-weight:800; color:var(--primary); }
+.hero-stat-label { font-size:0.8125rem; color:var(--text-muted); font-weight:500; }
+.hero-img { max-width:900px; margin:0 auto; border-radius:12px; box-shadow:0 20px 40px -12px rgba(30,58,95,0.2); border:1px solid var(--border); }
+@media(max-width:640px) { .hero h1 { font-size:2.25rem; } .hero-stats { gap:1rem; } .hero-stat-value { font-size:1.75rem; } .hero-stats > div { min-width:120px; padding:0.75rem 1rem; } }
+
+/* Problem */
+.problem-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:1.5rem; }
+.problem-card { background:var(--bg); border:1px solid var(--border); border-radius:12px; padding:1.75rem; transition:transform 0.2s, box-shadow 0.2s; position:relative; overflow:hidden; }
+.problem-card:hover { transform:translateY(-3px); box-shadow:var(--shadow-lg); }
+.problem-card::before { content:''; position:absolute; top:0; left:0; right:0; height:3px; background:linear-gradient(90deg, #EF4444, #F59E0B); }
+.problem-stat { font-size:2.25rem; font-weight:800; background:linear-gradient(135deg, #EF4444, #DC2626); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; margin-bottom:0.5rem; }
+.problem-card p { color:var(--text-secondary); font-size:0.9375rem; }
+
+/* Features */
+.features-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:1.5rem; }
+.feature-card { background:var(--bg); border:1px solid var(--border); border-radius:12px; padding:1.75rem; transition:box-shadow 0.25s, transform 0.25s, border-color 0.25s; position:relative; overflow:hidden; }
+.feature-card::before { content:''; position:absolute; top:0; left:0; right:0; height:3px; background:linear-gradient(90deg, var(--primary), var(--accent)); opacity:0; transition:opacity 0.25s; }
+.feature-card:hover { box-shadow:0 12px 24px -8px rgba(30,58,95,0.15); transform:translateY(-4px); border-color:var(--accent); }
+.feature-card:hover::before { opacity:1; }
+.feature-icon { width:48px; height:48px; border-radius:12px; background:linear-gradient(135deg, var(--badge-bg), #D4E0EE); display:flex; align-items:center; justify-content:center; margin-bottom:1rem; color:var(--primary); }
+.feature-card h3 { font-size:1.125rem; font-weight:700; margin-bottom:0.5rem; color:var(--primary); }
+.feature-card p { color:var(--text-secondary); font-size:0.9375rem; margin-bottom:0.75rem; }
+.tag-list { display:flex; flex-wrap:wrap; gap:0.375rem; }
+.tag { display:inline-block; background:linear-gradient(135deg, #EBF0F7, #E0E7F1); border:1px solid #D4DCE8; color:var(--primary); font-size:0.75rem; font-weight:500; padding:0.2rem 0.6rem; border-radius:100px; transition:background 0.2s; }
+.tag:hover { background:linear-gradient(135deg, #D4E0EE, #C7D6EB); }
+
+/* Pipeline */
+.pipeline-flow { display:flex; align-items:flex-start; gap:0.5rem; flex-wrap:wrap; justify-content:center; margin-bottom:2rem; }
+.pipeline-step { background:var(--bg); border:1px solid var(--border); border-radius:10px; padding:1rem 1.25rem; text-align:center; min-width:150px; flex:1; max-width:180px; transition:transform 0.2s, box-shadow 0.2s; }
+.pipeline-step:hover { transform:translateY(-3px); box-shadow:var(--shadow-lg); }
+.pipeline-num { width:32px; height:32px; border-radius:50%; background:linear-gradient(135deg, var(--primary), var(--accent)); color:#fff; font-size:0.875rem; font-weight:700; display:flex; align-items:center; justify-content:center; margin:0 auto 0.5rem; }
+.pipeline-step h4 { font-size:0.875rem; font-weight:600; margin-bottom:0.25rem; }
+.pipeline-step p { font-size:0.75rem; color:var(--text-muted); }
+.pipeline-arrow { color:var(--border); font-size:1.5rem; align-self:center; margin-top:1rem; }
+.pipeline-result { background:var(--badge-bg); border:1px solid #C7D6EB; border-radius:12px; padding:1.25rem; text-align:center; max-width:700px; margin:0 auto; }
+.pipeline-result h4 { color:var(--primary); font-weight:700; margin-bottom:0.5rem; }
+.pipeline-result p { color:var(--text-secondary); font-size:0.9375rem; }
+@media(max-width:768px) { .pipeline-arrow { display:none; } .pipeline-step { max-width:100%; } }
+
+/* Scanner Grid */
+.scanner-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:1rem; }
+.scanner-cat { background:var(--bg); border:1px solid var(--border); border-radius:10px; padding:1.25rem; border-left:4px solid var(--accent); transition:transform 0.2s, box-shadow 0.2s; position:relative; overflow:hidden; }
+.scanner-cat:hover { transform:translateY(-3px); box-shadow:var(--shadow-lg); }
+.scanner-cat::after { content:''; position:absolute; top:0; right:0; width:60px; height:60px; background:linear-gradient(135deg, transparent 50%, rgba(59,130,246,0.04) 50%); pointer-events:none; }
+.scanner-cat:nth-child(1) { border-left-color:#3B82F6; }
+.scanner-cat:nth-child(2) { border-left-color:#06B6D4; }
+.scanner-cat:nth-child(3) { border-left-color:#10B981; }
+.scanner-cat:nth-child(4) { border-left-color:#EF4444; }
+.scanner-cat:nth-child(5) { border-left-color:#F59E0B; }
+.scanner-cat:nth-child(6) { border-left-color:#8B5CF6; }
+.scanner-cat:nth-child(7) { border-left-color:#EC4899; }
+.scanner-cat:nth-child(8) { border-left-color:#14B8A6; }
+.scanner-cat:nth-child(9) { border-left-color:#0EA5E9; }
+.scanner-cat:nth-child(10) { border-left-color:#6366F1; }
+.scanner-cat:nth-child(11) { border-left-color:#F97316; }
+.scanner-cat:nth-child(12) { border-left-color:#22C55E; }
+.scanner-cat:nth-child(13) { border-left-color:#64748B; }
+.scanner-cat:nth-child(14) { border-left-color:#0284C7; }
+.scanner-cat:nth-child(15) { border-left-color:#DC2626; }
+.scanner-cat:nth-child(16) { border-left-color:#1E3A5F; }
+.scanner-cat-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:0.75rem; border-bottom:1px solid var(--border); padding-bottom:0.5rem; }
+.scanner-cat-name { font-weight:700; font-size:0.875rem; color:var(--text); }
+.scanner-cat-count { background:var(--badge-bg); color:var(--primary); font-size:0.75rem; font-weight:700; padding:0.2rem 0.6rem; border-radius:100px; min-width:24px; text-align:center; }
+.scanner-cat ul { list-style:none; }
+.scanner-cat li { font-size:0.8125rem; color:var(--text-secondary); padding:0.25rem 0; padding-left:0.75rem; position:relative; }
+.scanner-cat li::before { content:''; position:absolute; left:0; top:50%; width:4px; height:4px; border-radius:50%; background:var(--accent); transform:translateY(-50%); }
+.scanner-total { text-align:center; margin-top:1.25rem; font-size:1.125rem; font-weight:700; color:var(--primary); background:var(--badge-bg); display:inline-block; padding:0.75rem 2rem; border-radius:100px; }
+
+/* Steps */
+.steps-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:2rem; }
+.step-card { background:var(--bg); border:1px solid var(--border); border-radius:12px; padding:2rem; }
+.step-num { width:40px; height:40px; border-radius:50%; background:var(--primary); color:#fff; font-size:1.125rem; font-weight:700; display:flex; align-items:center; justify-content:center; margin-bottom:1rem; }
+.step-card h3 { font-size:1.25rem; font-weight:700; margin-bottom:0.5rem; }
+.step-card p { color:var(--text-secondary); font-size:0.9375rem; margin-bottom:0.5rem; }
+.step-detail { font-size:0.8125rem; color:var(--text-muted); font-style:italic; }
+
+/* Integrations */
+.integrations-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:1.5rem; }
+.integration-card { background:var(--bg); border:1px solid var(--border); border-radius:12px; padding:1.75rem; text-align:center; transition:transform 0.2s, box-shadow 0.2s, border-color 0.2s; }
+.integration-card:hover { box-shadow:0 12px 24px -8px rgba(30,58,95,0.12); transform:translateY(-4px); border-color:var(--accent); }
+.integration-icon { width:52px; height:52px; border-radius:14px; background:linear-gradient(135deg, var(--badge-bg), #D4E0EE); display:flex; align-items:center; justify-content:center; margin:0 auto 1rem; color:var(--primary); }
+.integration-card h3 { font-size:1rem; font-weight:700; margin-bottom:0.375rem; }
+.integration-card p { font-size:0.875rem; color:var(--text-secondary); }
+
+/* Comparison Table */
+.comparison-wrapper { overflow-x:auto; border-radius:12px; border:1px solid var(--border); box-shadow:var(--shadow-lg); }
+.comparison-table { width:100%; border-collapse:collapse; font-size:0.875rem; }
+.comparison-table th, .comparison-table td { padding:1rem 1.125rem; text-align:left; border-bottom:1px solid var(--border); }
+.comparison-table thead th { background:var(--bg-alt); font-weight:700; font-size:0.8125rem; text-transform:uppercase; letter-spacing:0.05em; color:var(--text-muted); }
+.comparison-table thead th:nth-child(2) { background:linear-gradient(135deg, var(--primary), var(--primary-light)); color:#fff; }
+.comparison-table tbody td:nth-child(2) { background:linear-gradient(135deg, #EBF0F7, #F0F5FF); font-weight:600; color:var(--primary); border-left:3px solid var(--accent); }
+.comparison-table tbody tr:hover { background:rgba(59,130,246,0.03); }
+.comparison-table tbody td { color:var(--text-secondary); }
+.comparison-table tbody td:first-child { font-weight:600; color:var(--text); }
+.cmp-good { color:var(--success); font-weight:700; }
+.cmp-bad { color:#CBD5E1; font-weight:500; }
+
+/* Footer */
+footer { background:var(--bg); color:var(--text-secondary); padding:2rem 0 1.5rem; border-top:1px solid var(--border); }
+footer .footer-inner { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:1.5rem; margin-bottom:1.5rem; }
+footer .footer-logo img { height:36px; }
+footer .footer-links { display:flex; gap:1.5rem; }
+footer .footer-links a { color:var(--text-muted); font-size:0.875rem; transition:color 0.2s; }
+footer .footer-links a:hover { color:var(--primary); }
+footer .footer-bottom { border-top:1px solid var(--border); padding-top:1rem; text-align:center; color:var(--text-muted); font-size:0.8125rem; }
+    </style>
+</head>
+<body>
+
+<nav>
+    <div class="container">
+        <a href="/" class="nav-logo"><img src="images/CodeHardener.png" alt="Code Hardener"></a>
+        <div class="nav-links">
+            <a href="#features">Features</a>
+            <a href="#scanners">Scanners</a>
+            <a href="#how-it-works">How It Works</a>
+            <a href="#comparison">vs Others</a>
+        </div>
+    </div>
+</nav>
+
+<!-- Hero -->
+<section class="hero">
+    <div class="container">
+        <div class="hero-badge">Native MCP integration for Claude Code &amp; Cursor</div>
+        <h1>The Assurance Layer for<br><span>AI-Generated Code</span></h1>
+        <p>70+ tools for code quality, security, testing, and supply chain integrity. The most comprehensive assurance platform built for developers who ship with AI.</p>
+        <div class="hero-stats">
+            <div><div class="hero-stat-value">70+</div><div class="hero-stat-label">Assurance Tools</div></div>
+            <div><div class="hero-stat-value">18</div><div class="hero-stat-label">Scan Profiles</div></div>
+            <div><div class="hero-stat-value">15+</div><div class="hero-stat-label">Languages</div></div>
+            <div><div class="hero-stat-value">1000</div><div class="hero-stat-label">Point Quality Score</div></div>
+        </div>
+    </div>
+</section>
+
+<!-- Problem -->
+<section class="section" id="problem">
+    <div class="container">
+        <div class="section-header">
+            <span class="section-badge">The Problem</span>
+            <h2>AI Writes Code Fast. Quality Assurance Can't Keep Up.</h2>
+            <p>AI coding assistants generate thousands of lines per day. Speed without assurance means shipping quality gaps at scale.</p>
+        </div>
+        <div class="problem-grid">
+            <div class="problem-card"><div class="problem-stat">62%</div><p>of AI-generated code contains dead code, duplication, or naming inconsistencies that degrade maintainability</p></div>
+            <div class="problem-card"><div class="problem-stat">3.6x</div><p>faster code production but test coverage drops &mdash; AI writes features, not the tests that validate them</p></div>
+            <div class="problem-card"><div class="problem-stat">91%</div><p>of projects have no SBOM, no signed dependencies, and no supply chain verification whatsoever</p></div>
+            <div class="problem-card"><div class="problem-stat">40%</div><p>of AI-generated code contains at least one security vulnerability, shipped without review</p></div>
+        </div>
+    </div>
+</section>
+
+<!-- Features -->
+<section class="section section-alt" id="features">
+    <div class="container">
+        <div class="section-header">
+            <span class="section-badge">Platform Capabilities</span>
+            <h2>Everything You Need to Ship Production-Ready Code</h2>
+            <p>Eight integrated capabilities across six pillars of code assurance &mdash; from quality to security to supply chain.</p>
+        </div>
+        <div class="features-grid">
+            <div class="feature-card">
+                <div class="feature-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg></div>
+                <h3>AI Code Quality</h3>
+                <p>10 custom TypeScript analyzers purpose-built for AI-generated code patterns that traditional tools miss.</p>
+                <div class="tag-list"><span class="tag">Dead Code</span><span class="tag">Duplication</span><span class="tag">Naming</span><span class="tag">Type Safety</span><span class="tag">Complexity</span><span class="tag">Error Patterns</span><span class="tag">Dependencies</span><span class="tag">Doc Coverage</span><span class="tag">Consistency</span><span class="tag">Hallucination</span></div>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div>
+                <h3>Quality Score System</h3>
+                <p>0&ndash;1000 composite score with sqrt penalty scaling, 12 quality bonuses, severity ceilings, and cryptographic attestation.</p>
+                <div class="tag-list"><span class="tag">1000-Point Scale</span><span class="tag">12 Bonuses</span><span class="tag">Sigstore</span><span class="tag">Ed25519</span></div>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg></div>
+                <h3>Mutation Testing</h3>
+                <p>Test your tests. Three engines inject faults to verify your test suite catches real bugs.</p>
+                <div class="tag-list"><span class="tag">Stryker (JS/TS)</span><span class="tag">mutmut (Python)</span><span class="tag">Pitest (Java)</span></div>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg></div>
+                <h3>SAST &amp; DAST</h3>
+                <p>Eleven engines for static and dynamic analysis across 15+ languages.</p>
+                <div class="tag-list"><span class="tag">Semgrep</span><span class="tag">OpenGrep</span><span class="tag">Bandit</span><span class="tag">Gosec</span><span class="tag">ESLint Security</span><span class="tag">PMD</span><span class="tag">Nuclei</span><span class="tag">ZAP</span><span class="tag">sqlmap</span><span class="tag">dalfox</span><span class="tag">ffuf</span></div>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></div>
+                <h3>SCA &amp; Container</h3>
+                <p>CVE detection across every dependency tree plus container image hardening.</p>
+                <div class="tag-list"><span class="tag">Trivy</span><span class="tag">Grype</span><span class="tag">Dockle</span><span class="tag">Hadolint</span><span class="tag">cargo-audit</span></div>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></div>
+                <h3>Secrets &amp; IaC</h3>
+                <p>150+ secret patterns across full git history. 1000+ infrastructure policies.</p>
+                <div class="tag-list"><span class="tag">Gitleaks</span><span class="tag">Checkov</span></div>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.78 7.78 5.5 5.5 0 0 1 7.78-7.78zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg></div>
+                <h3>API &amp; Load Testing</h3>
+                <p>Seven tools for contract testing, fuzz testing, schema validation, and load benchmarking.</p>
+                <div class="tag-list"><span class="tag">Newman</span><span class="tag">Pact</span><span class="tag">RESTler</span><span class="tag">Schemathesis</span><span class="tag">Keploy</span><span class="tag">Locust</span><span class="tag">Artillery</span></div>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg></div>
+                <h3>Supply Chain &amp; SBOM</h3>
+                <p>Full SBOM, cryptographic signing via Sigstore, SLSA provenance, and license detection.</p>
+                <div class="tag-list"><span class="tag">Syft</span><span class="tag">cdxgen</span><span class="tag">Cosign</span><span class="tag">Socket.dev</span><span class="tag">ScanCode</span></div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- Enrichment Pipeline -->
+<section class="section" id="pipeline">
+    <div class="container">
+        <div class="section-header">
+            <span class="section-badge">Unique Differentiator</span>
+            <h2>6-Stage Finding Enrichment Pipeline</h2>
+            <p>Raw scanner output is noisy. Our post-scan intelligence pipeline dramatically reduces false positives through framework-aware analysis.</p>
+        </div>
+        <div class="pipeline-flow">
+            <div class="pipeline-step"><div class="pipeline-num">1</div><h4>Code Analysis</h4><p>10 modules map languages, frameworks, endpoints, auth &amp; dataflows</p></div>
+            <div class="pipeline-arrow">&rarr;</div>
+            <div class="pipeline-step"><div class="pipeline-num">2</div><h4>Framework Suppressions</h4><p>Auto-suppress known FPs: Django ORM, React JSX, Rails defaults</p></div>
+            <div class="pipeline-arrow">&rarr;</div>
+            <div class="pipeline-step"><div class="pipeline-num">3</div><h4>Reachability</h4><p>Tag findings as reachable or unreachable from entry points</p></div>
+            <div class="pipeline-arrow">&rarr;</div>
+            <div class="pipeline-step"><div class="pipeline-num">4</div><h4>Dataflow Cross-Ref</h4><p>Match findings against sinks, suppress sanitized paths</p></div>
+            <div class="pipeline-arrow">&rarr;</div>
+            <div class="pipeline-step"><div class="pipeline-num">5</div><h4>Exploitability</h4><p>Classify: confirmed, likely, theoretical, or unlikely</p></div>
+            <div class="pipeline-arrow">&rarr;</div>
+            <div class="pipeline-step"><div class="pipeline-num">6</div><h4>LLM Verification</h4><p>AI-powered adversarial exploit verification</p></div>
+        </div>
+        <div class="pipeline-result">
+            <h4>Result: Only Actionable Findings Reach Your Dashboard</h4>
+            <p>60&ndash;80% fewer false positives compared to raw scanner output. Every remaining finding validated through multiple intelligence layers.</p>
+        </div>
+    </div>
+</section>
+
+<!-- Scanner Arsenal -->
+<section class="section section-alt" id="scanners">
+    <div class="container">
+        <div class="section-header">
+            <span class="section-badge">The Arsenal</span>
+            <h2>70+ Tools Across 6 Assurance Domains</h2>
+            <p>Code quality, security, testing, performance, supply chain, and infrastructure tools &mdash; pre-configured and orchestrated.</p>
+        </div>
+        <div class="scanner-grid">
+            <div class="scanner-cat"><div class="scanner-cat-header"><span class="scanner-cat-name">Code Quality</span><span class="scanner-cat-count">19</span></div><ul><li>10 AI Analyzers (Dead Code, Duplication, Naming, Type Safety, Complexity, Error Patterns, Dependencies, Doc Coverage, Consistency, Hallucination)</li><li>Oxlint</li><li>jscpd</li><li>Ruff</li><li>Knip</li><li>typos</li><li>Vale</li><li>PHPStan</li><li>Spectral</li><li>lychee</li></ul></div>
+            <div class="scanner-cat"><div class="scanner-cat-header"><span class="scanner-cat-name">Security</span><span class="scanner-cat-count">16</span></div><ul><li>Semgrep / OpenGrep</li><li>Bandit</li><li>Gosec</li><li>ESLint Security</li><li>PMD</li><li>Nuclei</li><li>OWASP ZAP</li><li>Gitleaks</li><li>Checkov</li><li>STRIDE</li><li>actionlint</li><li>Poutine</li><li>Scorecard</li><li>sqlmap</li><li>dalfox</li><li>ffuf</li></ul></div>
+            <div class="scanner-cat"><div class="scanner-cat-header"><span class="scanner-cat-name">Testing</span><span class="scanner-cat-count">14</span></div><ul><li>Playwright</li><li>BackstopJS</li><li>Pa11y</li><li>axe-core</li><li>Stryker (JS/TS)</li><li>mutmut (Python)</li><li>Pitest (Java)</li><li>selenium-gen</li><li>DeepEval</li><li>Jest</li><li>pytest</li><li>c8</li><li>fast-check</li><li>Hypothesis</li></ul></div>
+            <div class="scanner-cat"><div class="scanner-cat-header"><span class="scanner-cat-name">Performance &amp; API</span><span class="scanner-cat-count">7</span></div><ul><li>Locust</li><li>Artillery</li><li>Newman</li><li>Pact</li><li>RESTler</li><li>Schemathesis</li><li>Keploy</li></ul></div>
+            <div class="scanner-cat"><div class="scanner-cat-header"><span class="scanner-cat-name">Supply Chain</span><span class="scanner-cat-count">12</span></div><ul><li>Trivy</li><li>Grype</li><li>Syft</li><li>cdxgen</li><li>Cosign</li><li>Socket.dev</li><li>ScanCode</li><li>package-validator</li><li>Dockle</li><li>Hadolint</li><li>cargo-audit</li><li>KubeLinter</li></ul></div>
+            <div class="scanner-cat"><div class="scanner-cat-header"><span class="scanner-cat-name">Policy &amp; Reporting</span><span class="scanner-cat-count">6</span></div><ul><li>OPA</li><li>Conftest</li><li>Giskard</li><li>dotenv-linter</li><li>DefectDojo</li><li>SLSA Provenance</li></ul></div>
+        </div>
+        <div style="text-align:center"><span class="scanner-total">70+ Total Tools &mdash; 52 external + 17 custom TypeScript analyzers</span></div>
+    </div>
+</section>
+
+<!-- How It Works -->
+<section class="section" id="how-it-works">
+    <div class="container">
+        <div class="section-header">
+            <span class="section-badge">How It Works</span>
+            <h2>Three Steps to Hardened Code</h2>
+            <p>Zero configuration required. Point Code Hardener at your code and get a comprehensive quality assessment in minutes.</p>
+        </div>
+        <div class="steps-grid">
+            <div class="step-card">
+                <div class="step-num">1</div>
+                <h3>Connect</h3>
+                <p>Point at your repo &mdash; local path, GitHub URL, or container image. Code Hardener handles the rest.</p>
+                <p class="step-detail">Supports monorepos, multi-language projects, and containerized applications</p>
+            </div>
+            <div class="step-card">
+                <div class="step-num">2</div>
+                <h3>Scan</h3>
+                <p>Auto-detects languages and frameworks, then selects the right scanners from 18 profiles.</p>
+                <p class="step-detail">quick / standard / comprehensive / security / api / performance / frontend / supply-chain / ai-security / ai-code-quality / database / chaos / pr / pre-commit / compliance / usability / unit-test / full</p>
+            </div>
+            <div class="step-card">
+                <div class="step-num">3</div>
+                <h3>Review</h3>
+                <p>Plain-language findings with CWE/OWASP mapping, a 0&ndash;1000 quality score, and cryptographic attestation.</p>
+                <p class="step-detail">Every finding enriched through the 6-stage pipeline, signed with Sigstore</p>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- Integrations -->
+<section class="section section-alt">
+    <div class="container">
+        <div class="section-header">
+            <span class="section-badge">5 Ways to Integrate</span>
+            <h2>Works Where You Already Work</h2>
+            <p>Native integration with the tools AI-first developers already use.</p>
+        </div>
+        <div class="integrations-grid">
+            <div class="integration-card">
+                <div class="integration-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg></div>
+                <h3>MCP Server</h3>
+                <p>Native Model Context Protocol for Claude Code and Cursor</p>
+            </div>
+            <div class="integration-card">
+                <div class="integration-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg></div>
+                <h3>Claude Code Skill</h3>
+                <p>Type /codehardener directly in your terminal</p>
+            </div>
+            <div class="integration-card">
+                <div class="integration-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.78 7.78 5.5 5.5 0 0 1 7.78-7.78zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg></div>
+                <h3>REST API</h3>
+                <p>Full API for custom integrations and CI/CD pipelines</p>
+            </div>
+            <div class="integration-card">
+                <div class="integration-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div>
+                <h3>Natural Language</h3>
+                <p>Describe what you want scanned in plain English</p>
+            </div>
+            <div class="integration-card">
+                <div class="integration-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68V3a2 2 0 0 1 4 0v.09c.003.658.396 1.25 1 1.51a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.604.852.997 1.51 1H21a2 2 0 0 1 0 4h-.09c-.658.003-1.25.396-1.51 1z"/></svg></div>
+                <h3>n8n Automation</h3>
+                <p>Workflow automation for scheduled scans and notifications</p>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- Comparison -->
+<section class="section" id="comparison">
+    <div class="container">
+        <div class="section-header">
+            <span class="section-badge">Why Code Hardener</span>
+            <h2>See How We Compare</h2>
+            <p>Other tools scan for bugs OR vulnerabilities. Code Hardener assures everything.</p>
+        </div>
+        <div class="comparison-wrapper">
+            <table class="comparison-table">
+                <thead>
+                    <tr><th>Capability</th><th>Code Hardener</th><th>Snyk</th><th>SonarQube</th><th>CodeClimate</th><th>Codacy</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>Number of Tools</td><td>70+</td><td class="cmp-bad">1&ndash;3</td><td class="cmp-bad">1</td><td class="cmp-bad">1</td><td class="cmp-bad">3&ndash;5</td></tr>
+                    <tr><td>AI Code Quality</td><td>10 analyzers</td><td class="cmp-bad">None</td><td class="cmp-bad">Limited</td><td class="cmp-bad">None</td><td class="cmp-bad">None</td></tr>
+                    <tr><td>Mutation Testing</td><td>3 engines</td><td class="cmp-bad">None</td><td class="cmp-bad">None</td><td class="cmp-bad">None</td><td class="cmp-bad">None</td></tr>
+                    <tr><td>Load / Performance Testing</td><td>2 engines (Locust, Artillery)</td><td class="cmp-bad">None</td><td class="cmp-bad">None</td><td class="cmp-bad">None</td><td class="cmp-bad">None</td></tr>
+                    <tr><td>Supply Chain / SBOM</td><td>Full (Syft + cdxgen + Cosign + Socket.dev)</td><td class="cmp-bad">Limited</td><td class="cmp-bad">None</td><td class="cmp-bad">None</td><td class="cmp-bad">None</td></tr>
+                    <tr><td>Finding Enrichment</td><td>6-stage pipeline</td><td class="cmp-bad">Basic</td><td class="cmp-bad">None</td><td class="cmp-bad">None</td><td class="cmp-bad">None</td></tr>
+                    <tr><td>Quality Score</td><td>1000-point system</td><td class="cmp-bad">Pass / Fail</td><td class="cmp-bad">Letter grade</td><td class="cmp-bad">GPA scale</td><td class="cmp-bad">Letter grade</td></tr>
+                    <tr><td>MCP / AI Integration</td><td>Native (Claude + Cursor)</td><td class="cmp-bad">None</td><td class="cmp-bad">None</td><td class="cmp-bad">None</td><td class="cmp-bad">None</td></tr>
+                    <tr><td>Self-Hostable</td><td class="cmp-good">Yes</td><td class="cmp-bad">No</td><td class="cmp-good">Yes</td><td class="cmp-bad">No</td><td class="cmp-bad">No</td></tr>
+                    <tr><td>Open Source Tools</td><td class="cmp-good">100% OSS</td><td class="cmp-bad">Proprietary</td><td class="cmp-bad">Proprietary</td><td class="cmp-bad">Proprietary</td><td class="cmp-bad">Proprietary</td></tr>
+                    <tr><td>False Positive Reduction</td><td>Framework + reachability + dataflow</td><td class="cmp-bad">Manual</td><td class="cmp-bad">Manual</td><td class="cmp-bad">Manual</td><td class="cmp-bad">Manual</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</section>
+
+<!-- Footer -->
+<footer>
+    <div class="container">
+        <div class="footer-inner">
+            <a href="/" class="footer-logo"><img src="images/CodeHardener.png" alt="Code Hardener"></a>
+            <div class="footer-links">
+                <a href="#features">Features</a>
+                <a href="#scanners">Scanners</a>
+                <a href="#how-it-works">How It Works</a>
+            </div>
+        </div>
+        <div class="footer-bottom">&copy; 2025&ndash;2026 Code Hardener. All rights reserved.</div>
+    </div>
+</footer>
+
+<script>
+document.addEventListener('DOMContentLoaded',function(){
+    // Smooth scroll
+    document.querySelectorAll('a[href^="#"]').forEach(a=>{
+        a.addEventListener('click',function(e){
+            e.preventDefault();
+            const t=document.querySelector(this.getAttribute('href'));
+            if(t)t.scrollIntoView({behavior:'smooth',block:'start'});
+        });
+    });
+    // Navbar scroll
+    const nav=document.querySelector('nav');
+    window.addEventListener('scroll',()=>{
+        nav.style.boxShadow=window.scrollY>50?'0 1px 3px rgba(0,0,0,0.1)':'none';
+    });
+});
+</script>
+
+</body>
+</html>

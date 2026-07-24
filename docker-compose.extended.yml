@@ -1,0 +1,506 @@
+# Code Hardener - Extended Security Testing Stack
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.extended.yml up
+#
+# This file adds optional security testing services to the core stack.
+# All 27 integrated security tools from the BRD are included here.
+
+services:
+  # ==========================================
+  # CODE QUALITY & STATIC ANALYSIS
+  # ==========================================
+
+  sonarqube:
+    image: sonarqube:10-community
+    container_name: codehardener-sonarqube
+    ports:
+      - "9000:9000"
+    environment:
+      - SONAR_ES_BOOTSTRAP_CHECKS_DISABLE=true
+      - SONAR_JDBC_URL=jdbc:postgresql://sonarqube-db:5432/sonar
+      - SONAR_JDBC_USERNAME=sonar
+      - SONAR_JDBC_PASSWORD=sonar
+    volumes:
+      - sonarqube_data:/opt/sonarqube/data
+      - sonarqube_extensions:/opt/sonarqube/extensions
+      - sonarqube_logs:/opt/sonarqube/logs
+    depends_on:
+      - sonarqube-db
+    profiles:
+      - code-quality
+      - all
+    networks:
+      - codehardener-network
+
+  sonarqube-db:
+    image: postgres:15-alpine
+    container_name: codehardener-sonarqube-db
+    environment:
+      - POSTGRES_USER=sonar
+      - POSTGRES_PASSWORD=sonar
+      - POSTGRES_DB=sonar
+    volumes:
+      - sonarqube_db:/var/lib/postgresql/data
+    profiles:
+      - code-quality
+      - all
+    networks:
+      - codehardener-network
+
+  # ==========================================
+  # SAST / SECURITY SCANNING
+  # ==========================================
+
+  trivy:
+    image: aquasec/trivy:latest
+    container_name: codehardener-trivy
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./code:/src
+      - ./reports/trivy:/reports
+      - trivy_cache:/root/.cache/
+    command: ["--version"]
+    profiles:
+      - security
+      - sast
+      - all
+    networks:
+      - codehardener-network
+
+  semgrep:
+    image: returntocorp/semgrep:latest
+    container_name: codehardener-semgrep
+    volumes:
+      - ./code:/src
+      - ./reports/semgrep:/reports
+    command: ["--version"]
+    profiles:
+      - security
+      - sast
+      - all
+    networks:
+      - codehardener-network
+
+  gitleaks:
+    image: zricethezav/gitleaks:latest
+    container_name: codehardener-gitleaks
+    volumes:
+      - ./code:/src
+      - ./reports/gitleaks:/reports
+    command: ["version"]
+    profiles:
+      - security
+      - secrets
+      - all
+    networks:
+      - codehardener-network
+
+  checkov:
+    image: bridgecrew/checkov:latest
+    container_name: codehardener-checkov
+    volumes:
+      - ./code:/code:ro
+      - ./reports/checkov:/reports
+    command: ["--version"]
+    profiles:
+      - security
+      - iac
+      - all
+    networks:
+      - codehardener-network
+
+  # ==========================================
+  # DAST / DYNAMIC TESTING
+  # ==========================================
+
+  owasp-zap:
+    image: zaproxy/zap-stable:latest
+    container_name: codehardener-zap
+    ports:
+      - "8082:8082"
+      - "8090:8090"
+    volumes:
+      - ./tests/security/zap-config:/zap/wrk
+      - ./reports/zap:/zap/reports
+    command: ["zap.sh", "-daemon", "-host", "0.0.0.0", "-port", "8082", "-config", "api.addrs.addr.name=.*", "-config", "api.addrs.addr.regex=true"]
+    profiles:
+      - security
+      - dast
+      - all
+    networks:
+      - codehardener-network
+
+  nuclei:
+    image: projectdiscovery/nuclei:latest
+    container_name: codehardener-nuclei
+    volumes:
+      - ./nuclei-templates:/root/nuclei-templates
+      - ./reports/nuclei:/reports
+    command: ["-update-templates"]
+    profiles:
+      - security
+      - dast
+      - all
+    networks:
+      - codehardener-network
+
+  # ==========================================
+  # API TESTING
+  # ==========================================
+
+  newman:
+    image: postman/newman:latest
+    container_name: codehardener-newman
+    volumes:
+      - ./tests/api:/collections
+      - ./reports/newman:/reports
+    command: ["--version"]
+    profiles:
+      - api
+      - all
+    networks:
+      - codehardener-network
+
+  wiremock:
+    image: wiremock/wiremock:latest
+    container_name: codehardener-wiremock
+    ports:
+      - "8081:8080"
+    volumes:
+      - ./tests/api/mocks/mappings:/home/wiremock/mappings
+      - ./tests/api/mocks/files:/home/wiremock/__files
+    command: ["--global-response-templating", "--verbose"]
+    profiles:
+      - api
+      - all
+    networks:
+      - codehardener-network
+
+  pact-broker:
+    image: pactfoundation/pact-broker:latest
+    container_name: codehardener-pact-broker
+    ports:
+      - "9292:9292"
+    environment:
+      - PACT_BROKER_DATABASE_URL=sqlite:////tmp/pact_broker.sqlite3
+      - PACT_BROKER_BASIC_AUTH_USERNAME=admin
+      - PACT_BROKER_BASIC_AUTH_PASSWORD=admin
+    volumes:
+      - pact_broker_data:/tmp
+    profiles:
+      - api
+      - contract
+      - all
+    networks:
+      - codehardener-network
+
+  restler:
+    image: mcr.microsoft.com/restlerfuzzer/restler:latest
+    container_name: codehardener-restler
+    volumes:
+      - ./tests/api/restler:/restler
+      - ./reports/restler:/reports
+    command: ["--help"]
+    profiles:
+      - api
+      - fuzzing
+      - all
+    networks:
+      - codehardener-network
+
+  # ==========================================
+  # PERFORMANCE & LOAD TESTING
+  # ==========================================
+
+  k6:
+    image: grafana/k6:latest
+    container_name: codehardener-k6
+    volumes:
+      - ./tests/performance:/scripts
+      - ./reports/k6:/reports
+    environment:
+      - K6_OUT=json=/reports/results.json
+      - TARGET_APP_URL=http://backend:4000
+    command: ["version"]
+    profiles:
+      - performance
+      - all
+    networks:
+      - codehardener-network
+
+  locust:
+    image: locustio/locust:latest
+    container_name: codehardener-locust
+    ports:
+      - "8089:8089"
+    volumes:
+      - ./tests/performance:/locust
+    command: ["-f", "/locust/locustfile.py", "--host", "http://backend:4000"]
+    profiles:
+      - performance
+      - all
+    networks:
+      - codehardener-network
+
+  artillery:
+    image: artilleryio/artillery:latest
+    container_name: codehardener-artillery
+    volumes:
+      - ./tests/performance:/scripts
+      - ./reports/artillery:/reports
+    command: ["--version"]
+    profiles:
+      - performance
+      - all
+    networks:
+      - codehardener-network
+
+  # ==========================================
+  # BROWSER & E2E TESTING
+  # ==========================================
+
+  playwright:
+    image: mcr.microsoft.com/playwright:latest
+    container_name: codehardener-playwright
+    volumes:
+      - ./tests/e2e:/tests
+      - ./reports/playwright:/reports
+    environment:
+      - PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+      - BASE_URL=http://dashboard:3000
+    working_dir: /tests
+    command: ["tail", "-f", "/dev/null"]
+    profiles:
+      - e2e
+      - all
+    networks:
+      - codehardener-network
+
+  backstopjs:
+    image: backstopjs/backstopjs:latest
+    container_name: codehardener-backstopjs
+    volumes:
+      - ./tests/visual:/src
+      - ./reports/backstop:/src/backstop_data
+    command: ["--version"]
+    profiles:
+      - visual
+      - all
+    networks:
+      - codehardener-network
+
+  pa11y:
+    image: node:20-slim
+    container_name: codehardener-pa11y
+    volumes:
+      - ./reports/accessibility:/reports
+    working_dir: /app
+    command: ["sh", "-c", "npm install -g pa11y pa11y-ci && tail -f /dev/null"]
+    profiles:
+      - accessibility
+      - all
+    networks:
+      - codehardener-network
+
+  # ==========================================
+  # SUPPLY CHAIN SECURITY
+  # ==========================================
+
+  syft:
+    image: anchore/syft:latest
+    container_name: codehardener-syft
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./reports/sbom:/reports
+      - ./code:/code:ro
+    command: ["version"]
+    profiles:
+      - supply-chain
+      - all
+    networks:
+      - codehardener-network
+
+  grype:
+    image: anchore/grype:latest
+    container_name: codehardener-grype
+    volumes:
+      - ./reports/sbom:/sbom:ro
+      - ./reports/grype:/reports
+      - grype_db:/root/.cache/grype
+    command: ["version"]
+    profiles:
+      - supply-chain
+      - all
+    networks:
+      - codehardener-network
+
+  cosign:
+    image: gcr.io/projectsigstore/cosign:latest
+    container_name: codehardener-cosign
+    volumes:
+      - ./reports/signatures:/signatures
+    command: ["version"]
+    profiles:
+      - supply-chain
+      - signing
+      - all
+    networks:
+      - codehardener-network
+
+  # ==========================================
+  # REPORTING & ANALYSIS
+  # ==========================================
+
+  allure:
+    image: frankescobar/allure-docker-service:latest
+    container_name: codehardener-allure
+    ports:
+      - "5051:5050"
+      - "4041:4040"
+    environment:
+      - CHECK_RESULTS_EVERY_SECONDS=3
+      - KEEP_HISTORY=1
+      - SECURITY_ENABLED=0
+      - MAKE_VIEWER_ENDPOINTS_PUBLIC=1
+    volumes:
+      - ./reports/allure-results:/app/allure-results
+      - ./reports/allure-reports:/app/allure-reports
+    profiles:
+      - reporting
+      - all
+    networks:
+      - codehardener-network
+
+  allure-ui:
+    image: frankescobar/allure-docker-service-ui:latest
+    container_name: codehardener-allure-ui
+    ports:
+      - "5252:5252"
+    environment:
+      - ALLURE_DOCKER_PUBLIC_API_URL=http://localhost:5051
+    depends_on:
+      - allure
+    profiles:
+      - reporting
+      - all
+    networks:
+      - codehardener-network
+
+  defectdojo:
+    image: defectdojo/defectdojo-django:latest
+    container_name: codehardener-defectdojo
+    ports:
+      - "8083:8080"
+    environment:
+      - DD_DATABASE_URL=postgresql://defectdojo:defectdojo@defectdojo-db:5432/defectdojo
+      - DD_SECRET_KEY=${DD_SECRET_KEY:-change-me-in-production-32-chars}
+      - DD_CREDENTIAL_AES_256_KEY=${DD_AES_KEY:-change-me-32-chars-long-key!!}
+      - DD_ALLOWED_HOSTS=*
+      - DD_CSRF_TRUSTED_ORIGINS=http://localhost:8083
+    volumes:
+      - defectdojo_media:/app/media
+    depends_on:
+      - defectdojo-db
+    profiles:
+      - reporting
+      - vulnerability-management
+      - all
+    networks:
+      - codehardener-network
+
+  defectdojo-db:
+    image: postgres:15-alpine
+    container_name: codehardener-defectdojo-db
+    environment:
+      - POSTGRES_USER=defectdojo
+      - POSTGRES_PASSWORD=defectdojo
+      - POSTGRES_DB=defectdojo
+    volumes:
+      - defectdojo_db:/var/lib/postgresql/data
+    profiles:
+      - reporting
+      - vulnerability-management
+      - all
+    networks:
+      - codehardener-network
+
+  # ==========================================
+  # CHAOS ENGINEERING
+  # ==========================================
+
+  toxiproxy:
+    image: ghcr.io/shopify/toxiproxy:latest
+    container_name: codehardener-toxiproxy
+    ports:
+      - "8474:8474"
+      - "19000-19010:19000-19010"
+    volumes:
+      - ./tests/chaos/toxiproxy:/config
+    profiles:
+      - chaos
+      - all
+    networks:
+      - codehardener-network
+
+  # ==========================================
+  # RUNTIME SECURITY
+  # ==========================================
+
+  falco:
+    image: falcosecurity/falco-no-driver:latest
+    container_name: codehardener-falco
+    privileged: true
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./tests/security/falco-rules:/etc/falco/rules.d:ro
+      - ./reports/falco:/var/log/falco
+    profiles:
+      - runtime
+      - all
+    networks:
+      - codehardener-network
+
+  # ==========================================
+  # DATABASE TESTING
+  # ==========================================
+
+  flyway:
+    image: flyway/flyway:latest
+    container_name: codehardener-flyway
+    volumes:
+      - ./postgres/migrations:/flyway/sql
+      - ./postgres/flyway.conf:/flyway/conf/flyway.conf
+    command: ["info"]
+    profiles:
+      - database
+      - all
+    networks:
+      - codehardener-network
+
+  # ==========================================
+  # POLICY ENGINE
+  # ==========================================
+
+  opa:
+    image: openpolicyagent/opa:latest
+    container_name: codehardener-opa
+    ports:
+      - "8181:8181"
+    volumes:
+      - ./backend/src/policies:/policies:ro
+    command: ["run", "--server", "--addr", "0.0.0.0:8181", "/policies"]
+    profiles:
+      - policy
+      - all
+    networks:
+      - codehardener-network
+
+volumes:
+  sonarqube_data:
+  sonarqube_extensions:
+  sonarqube_logs:
+  sonarqube_db:
+  trivy_cache:
+  grype_db:
+  defectdojo_media:
+  defectdojo_db:
+  pact_broker_data:

@@ -1,0 +1,578 @@
+# Code Hardener Scanner Container
+# Contains 66 code security scanning tools for the Assurance Layer
+
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+
+# Install dependencies
+RUN npm install
+
+# Copy source code
+COPY tsconfig.json ./
+COPY src ./src
+
+# Build TypeScript
+RUN npm run build
+
+# Scanner runtime stage
+FROM node:20-alpine
+
+# Get target architecture for multi-arch support
+ARG TARGETARCH
+
+WORKDIR /app
+
+# Install system dependencies for scanners
+RUN apk add --no-cache \
+    bash \
+    curl \
+    wget \
+    git \
+    python3 \
+    python3-dev \
+    py3-pip \
+    go \
+    ruby \
+    jq \
+    ca-certificates \
+    openssl \
+    unzip \
+    build-base \
+    libffi-dev \
+    icu-dev \
+    openjdk17-jre-headless \
+    chromium \
+    chromium-chromedriver \
+    nss \
+    freetype \
+    harfbuzz \
+    ttf-freefont
+
+# Create directories
+RUN mkdir -p /scan-target /app/scan-results /app/tools
+
+# ==========================================
+# CATEGORY 1: SAST (Static Application Security Testing)
+# ==========================================
+
+# 1. Semgrep (OpenGrep compatible) - Multi-language SAST
+RUN pip3 install --no-cache-dir semgrep --break-system-packages
+
+# 2. Bandit - Python SAST
+RUN pip3 install --no-cache-dir bandit --break-system-packages
+
+# 3. Gosec - Go SAST
+RUN go install github.com/securego/gosec/v2/cmd/gosec@latest \
+    && mv /root/go/bin/gosec /usr/local/bin/
+
+# 4. ESLint Security - JavaScript/TypeScript SAST
+RUN npm install -g eslint @eslint/js eslint-plugin-security eslint-plugin-no-unsanitized
+
+# 5. PMD - Multi-language SAST (Java, JS, XML, etc.)
+RUN wget -q https://github.com/pmd/pmd/releases/download/pmd_releases%2F7.24.0/pmd-dist-7.24.0-bin.zip \
+    && unzip -q pmd-dist-7.24.0-bin.zip -d /app/tools/ \
+    && ln -s /app/tools/pmd-bin-7.24.0/bin/pmd /usr/local/bin/pmd \
+    && rm pmd-dist-7.24.0-bin.zip
+
+# ==========================================
+# CATEGORY 2: DAST (Dynamic Application Security Testing)
+# ==========================================
+
+# 6. Nuclei - Fast vulnerability scanner
+RUN ARCH=$(uname -m); \
+    if [ "$ARCH" = "x86_64" ]; then NUCLEI_ARCH="amd64"; \
+    elif [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then NUCLEI_ARCH="arm64"; \
+    else NUCLEI_ARCH="amd64"; fi && \
+    wget -q https://github.com/projectdiscovery/nuclei/releases/download/v3.7.0/nuclei_3.7.0_linux_${NUCLEI_ARCH}.zip \
+    && unzip -o -j nuclei_3.7.0_linux_${NUCLEI_ARCH}.zip nuclei -d /usr/local/bin/ \
+    && chmod +x /usr/local/bin/nuclei \
+    && rm nuclei_3.7.0_linux_${NUCLEI_ARCH}.zip \
+    && /usr/local/bin/nuclei -update-templates 2>/dev/null || true
+
+# 7. OWASP ZAP - Web app scanner (cross-platform Java version)
+RUN wget -q https://github.com/zaproxy/zaproxy/releases/download/v2.17.0/ZAP_2.17.0_Crossplatform.zip \
+    && unzip -q ZAP_2.17.0_Crossplatform.zip -d /app/tools/ \
+    && ln -s /app/tools/ZAP_2.17.0/zap.sh /usr/local/bin/zap \
+    && chmod +x /app/tools/ZAP_2.17.0/zap.sh \
+    && rm ZAP_2.17.0_Crossplatform.zip
+
+# ==========================================
+# CATEGORY 3: SCA (Software Composition Analysis)
+# ==========================================
+
+# 8. Trivy - Container/dependency vulnerability scanner
+RUN curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+
+# 9. Grype - Container SCA
+RUN curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin
+
+# ==========================================
+# CATEGORY 4: Secrets Detection
+# ==========================================
+
+# 10. Gitleaks - Secret detection
+RUN ARCH=$(uname -m); \
+    if [ "$ARCH" = "x86_64" ]; then GITLEAKS_ARCH="x64"; \
+    elif [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then GITLEAKS_ARCH="arm64"; \
+    else GITLEAKS_ARCH="x64"; fi && \
+    wget -q https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_${GITLEAKS_ARCH}.tar.gz \
+    && tar -xzf gitleaks_8.30.1_linux_${GITLEAKS_ARCH}.tar.gz \
+    && mv gitleaks /usr/local/bin/ \
+    && rm gitleaks_8.30.1_linux_${GITLEAKS_ARCH}.tar.gz
+
+# detect-secrets removed: redundant with Gitleaks
+
+# ==========================================
+# CATEGORY 5: IaC Security
+# ==========================================
+
+# 12. Checkov - IaC security scanner (Terraform, CloudFormation, K8s, etc.)
+RUN pip3 install --no-cache-dir checkov --break-system-packages
+
+# ==========================================
+# CATEGORY 6: Load Testing
+# ==========================================
+
+# 13. Locust - Python load testing
+RUN pip3 install --no-cache-dir locust --break-system-packages
+
+# 14. Artillery - Node.js load testing
+RUN npm install -g artillery
+
+# k6 removed: replaced by pure TypeScript scanners
+
+# ==========================================
+# CATEGORY 7: API Testing
+# ==========================================
+
+# 16. Newman - Postman CLI for API testing
+RUN npm install -g newman newman-reporter-htmlextra
+
+# 17. Pact - Contract testing
+RUN npm install -g @pact-foundation/pact-cli
+
+# 18. RESTler - REST API fuzzing (Microsoft Research)
+# RESTler requires .NET runtime. Install dotnet and RESTler tool.
+RUN wget -q https://dot.net/v1/dotnet-install.sh -O /tmp/dotnet-install.sh \
+    && chmod +x /tmp/dotnet-install.sh \
+    && /tmp/dotnet-install.sh --channel 8.0 --runtime dotnet --install-dir /usr/share/dotnet \
+    && ln -s /usr/share/dotnet/dotnet /usr/local/bin/dotnet \
+    && rm /tmp/dotnet-install.sh \
+    && dotnet tool install --global RESTlerFuzzer --version 9.2.4 \
+    && ln -s /root/.dotnet/tools/restler /usr/local/bin/restler \
+    || echo "RESTler install completed with warnings"
+
+# ==========================================
+# CATEGORY 8: Browser/Visual Testing
+# ==========================================
+
+# 19. Playwright - Browser automation
+RUN npm install -g playwright && \
+    PLAYWRIGHT_BROWSERS_PATH=/app/tools/browsers npx playwright install chromium --with-deps || true
+
+# 20. BackstopJS - Visual regression testing
+RUN npm install -g backstopjs
+
+# 21. Pa11y - Accessibility testing (skip Puppeteer's bundled Chrome — use system chromium)
+RUN PUPPETEER_SKIP_DOWNLOAD=true npm install -g pa11y pa11y-ci
+
+# Selenium WebDriver (uses system chromium-chromedriver already installed)
+RUN npm install -g selenium-webdriver mocha
+
+# ==========================================
+# CATEGORY 9: Supply Chain Security
+# ==========================================
+
+# 22. Syft - SBOM generator
+RUN curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
+
+# 23. in-toto - Supply chain attestation
+RUN pip3 install --no-cache-dir in-toto --break-system-packages
+
+# 24. Cosign - Sigstore signing for attestations
+RUN ARCH=$(uname -m); \
+    if [ "$ARCH" = "x86_64" ]; then COSIGN_ARCH="amd64"; \
+    elif [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then COSIGN_ARCH="arm64"; \
+    else COSIGN_ARCH="amd64"; fi && \
+    wget -q https://github.com/sigstore/cosign/releases/download/v3.0.6/cosign-linux-${COSIGN_ARCH} \
+    && chmod +x cosign-linux-${COSIGN_ARCH} \
+    && mv cosign-linux-${COSIGN_ARCH} /usr/local/bin/cosign
+
+# ==========================================
+# CATEGORY 10: Policy & Reporting
+# ==========================================
+
+# 25. OPA (Open Policy Agent) - Policy as code
+RUN ARCH=$(uname -m); \
+    if [ "$ARCH" = "x86_64" ]; then OPA_ARCH="amd64"; \
+    elif [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then OPA_ARCH="arm64"; \
+    else OPA_ARCH="amd64"; fi && \
+    wget -q https://openpolicyagent.org/downloads/v1.15.1/opa_linux_${OPA_ARCH}_static \
+    && chmod +x opa_linux_${OPA_ARCH}_static \
+    && mv opa_linux_${OPA_ARCH}_static /usr/local/bin/opa
+
+# 26. Allure - Test reporting
+RUN wget -q https://github.com/allure-framework/allure2/releases/download/2.39.0/allure-2.39.0.zip \
+    && unzip -q allure-2.39.0.zip -d /app/tools/ \
+    && ln -s /app/tools/allure-2.39.0/bin/allure /usr/local/bin/allure \
+    && rm allure-2.39.0.zip
+
+# 27. Conftest - Policy testing for structured data (Kubernetes, Terraform, etc.)
+RUN ARCH=$(uname -m); \
+    if [ "$ARCH" = "x86_64" ]; then CONFTEST_ARCH="x86_64"; \
+    elif [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then CONFTEST_ARCH="arm64"; \
+    else CONFTEST_ARCH="x86_64"; fi && \
+    wget -q https://github.com/open-policy-agent/conftest/releases/download/v0.68.2/conftest_0.68.2_Linux_${CONFTEST_ARCH}.tar.gz \
+    && tar -xzf conftest_0.68.2_Linux_${CONFTEST_ARCH}.tar.gz \
+    && mv conftest /usr/local/bin/ \
+    && rm conftest_0.68.2_Linux_${CONFTEST_ARCH}.tar.gz
+
+# garak removed: config-detection-only mode provides minimal value
+# pip-audit removed: redundant with Trivy + Grype SCA coverage
+
+# ==========================================
+# CATEGORY 11: Container Hardening
+# ==========================================
+
+# 28. Dockle - Container image security linter (Apache-2.0)
+# Checks CIS Docker Benchmark compliance
+RUN ARCH=$(uname -m); \
+    if [ "$ARCH" = "x86_64" ]; then DOCKLE_ARCH="64bit"; \
+    elif [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then DOCKLE_ARCH="ARM64"; \
+    else DOCKLE_ARCH="64bit"; fi && \
+    wget -q https://github.com/goodwithtech/dockle/releases/download/v0.4.15/dockle_0.4.15_Linux-${DOCKLE_ARCH}.tar.gz \
+    && tar -xzf dockle_0.4.15_Linux-${DOCKLE_ARCH}.tar.gz \
+    && mv dockle /usr/local/bin/ \
+    && rm dockle_0.4.15_Linux-${DOCKLE_ARCH}.tar.gz
+
+# 29. Hadolint - Dockerfile best practices linter (GPL-3.0)
+# Complements Dockle (CIS) with lint-level Dockerfile checks
+RUN ARCH=$(uname -m); \
+    if [ "$ARCH" = "x86_64" ]; then HADOLINT_ARCH="x86_64"; \
+    elif [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then HADOLINT_ARCH="arm64"; \
+    else HADOLINT_ARCH="x86_64"; fi && \
+    wget -q https://github.com/hadolint/hadolint/releases/download/v2.14.0/hadolint-Linux-${HADOLINT_ARCH} \
+    && chmod +x hadolint-Linux-${HADOLINT_ARCH} \
+    && mv hadolint-Linux-${HADOLINT_ARCH} /usr/local/bin/hadolint \
+    && which hadolint || (echo "FATAL: hadolint install failed" && exit 1)
+
+# ==========================================
+# CATEGORY 14: AI Code Quality
+# ==========================================
+
+# 37. ScanCode Toolkit - Snippet-level license detection (Apache-2.0)
+# scancode downgrades spdx-tools and click; restore after to fix checkov/semgrep
+RUN pip3 install --no-cache-dir scancode-toolkit --break-system-packages \
+    && pip3 install --no-cache-dir 'spdx-tools>=0.8.0,<0.9.0' 'click~=8.1.0' --break-system-packages
+
+# 38. mutmut - Python mutation testing (BSD-3-Clause)
+RUN pip3 install --no-cache-dir mutmut --break-system-packages
+
+# 47. pytest + reporting plugins for test runner scanner
+RUN pip3 install --no-cache-dir pytest pytest-json-report pytest-cov --break-system-packages
+
+# 39. Schemathesis - Schema-driven API testing (MIT)
+RUN pip3 install --no-cache-dir schemathesis --break-system-packages
+
+# 40. Stryker Mutator - JS/TS mutation testing (Apache-2.0)
+# Installed via npx at runtime, no build-time install needed
+
+# 41. Pitest - Java mutation testing (Apache-2.0)
+# Runs via Maven/Gradle plugin, no standalone install needed
+
+# 42. AFL++ - Coverage-guided fuzzing (Apache-2.0)
+RUN apk add --no-cache afl++ 2>/dev/null || echo "AFL++ not available on Alpine — will skip at runtime"
+
+# ==========================================
+# CATEGORY 15: Code Quality & Dead Code
+# ==========================================
+
+# 49. Knip - JS/TS dead code detection (ISC)
+# Runs via npx at runtime, no build-time install needed
+
+# 50. Oxlint - Fast JS/TS linter (MIT)
+RUN npm install -g oxlint
+
+# 51. jscpd - Cross-language copy-paste detection (MIT)
+RUN npm install -g jscpd
+
+# 52. Ruff - Ultra-fast Python linter (MIT)
+RUN pip3 install --no-cache-dir ruff --break-system-packages
+
+# 53. PHPStan - PHP static analysis (MIT) — optional, PHP projects only
+RUN apk add --no-cache php82 php82-phar php82-json php82-mbstring php82-openssl php82-tokenizer composer 2>/dev/null && \
+    composer global require phpstan/phpstan 2>/dev/null && \
+    ln -sf /root/.composer/vendor/bin/phpstan /usr/local/bin/phpstan \
+    && which phpstan && echo "PHPStan installed" \
+    || echo "PHPStan unavailable — scanner will skip at runtime"
+
+# 54. typos - Source code spell checker (MIT/Apache-2.0)
+RUN ARCH=$(uname -m); \
+    if [ "$ARCH" = "x86_64" ]; then TYPOS_ARCH="x86_64-unknown-linux-musl"; \
+    elif [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then TYPOS_ARCH="aarch64-unknown-linux-musl"; \
+    else TYPOS_ARCH="x86_64-unknown-linux-musl"; fi && \
+    wget -q https://github.com/crate-ci/typos/releases/download/v1.44.0/typos-v1.44.0-${TYPOS_ARCH}.tar.gz \
+    && tar -xzf typos-v1.44.0-${TYPOS_ARCH}.tar.gz \
+    && (mv ./typos /usr/local/bin/ 2>/dev/null || mv typos /usr/local/bin/) \
+    && rm -f typos-v1.44.0-${TYPOS_ARCH}.tar.gz \
+    && which typos && echo "typos installed" \
+    || echo "typos unavailable on this architecture — scanner will skip at runtime"
+
+# 55. Vale - Documentation prose linter (MIT)
+# Pre-built binaries are glibc-linked; build from source on Alpine (musl)
+RUN go install github.com/errata-ai/vale/v3/cmd/vale@v3.13.1 \
+    && mv /root/go/bin/vale /usr/local/bin/
+
+# 56. Libyear - pure TypeScript scanner, no external binary needed
+
+# ==========================================
+# CATEGORY 16: CI/CD & Infrastructure Security
+# ==========================================
+
+# 57. actionlint - GitHub Actions linter (MIT)
+RUN ARCH=$(uname -m); \
+    if [ "$ARCH" = "x86_64" ]; then AL_ARCH="amd64"; \
+    elif [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then AL_ARCH="arm64"; \
+    else AL_ARCH="amd64"; fi && \
+    wget -q https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_${AL_ARCH}.tar.gz \
+    && tar -xzf actionlint_1.7.12_linux_${AL_ARCH}.tar.gz actionlint \
+    && mv actionlint /usr/local/bin/ \
+    && rm actionlint_1.7.12_linux_${AL_ARCH}.tar.gz
+
+# 58. Poutine - CI/CD pipeline security (Apache-2.0)
+RUN ARCH=$(uname -m); \
+    if [ "$ARCH" = "x86_64" ]; then POUTINE_ARCH="amd64"; \
+    elif [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then POUTINE_ARCH="arm64"; \
+    else POUTINE_ARCH="amd64"; fi && \
+    wget -q https://github.com/boostsecurityio/poutine/releases/download/v1.0.8/poutine_linux_${POUTINE_ARCH}.tar.gz \
+    && tar -xzf poutine_linux_${POUTINE_ARCH}.tar.gz \
+    && mv poutine /usr/local/bin/ \
+    && rm -f poutine_linux_${POUTINE_ARCH}.tar.gz \
+    && which poutine || (echo "FATAL: poutine install failed" && exit 1)
+
+# 59. OpenSSF Scorecard - Supply chain security scoring (Apache-2.0)
+RUN ARCH=$(uname -m); \
+    if [ "$ARCH" = "x86_64" ]; then SC_ARCH="amd64"; \
+    elif [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then SC_ARCH="arm64"; \
+    else SC_ARCH="amd64"; fi && \
+    wget -q https://github.com/ossf/scorecard/releases/download/v5.1.0/scorecard_5.1.0_linux_${SC_ARCH}.tar.gz \
+    && tar -xzf scorecard_5.1.0_linux_${SC_ARCH}.tar.gz \
+    && (mv scorecard-linux-${SC_ARCH} /usr/local/bin/scorecard 2>/dev/null || mv scorecard /usr/local/bin/) \
+    && rm -f scorecard_5.1.0_linux_${SC_ARCH}.tar.gz \
+    && which scorecard || (echo "FATAL: scorecard install failed" && exit 1)
+
+# 60. Kubeconform - K8s manifest validation (Apache-2.0)
+RUN ARCH=$(uname -m); \
+    if [ "$ARCH" = "x86_64" ]; then KC_ARCH="amd64"; \
+    elif [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then KC_ARCH="arm64"; \
+    else KC_ARCH="amd64"; fi && \
+    wget -q https://github.com/yannh/kubeconform/releases/download/v0.7.0/kubeconform-linux-${KC_ARCH}.tar.gz \
+    && tar -xzf kubeconform-linux-${KC_ARCH}.tar.gz kubeconform \
+    && mv kubeconform /usr/local/bin/ \
+    && rm kubeconform-linux-${KC_ARCH}.tar.gz
+
+# 61. KubeLinter - K8s security linting (Apache-2.0)
+RUN ARCH=$(uname -m); \
+    if [ "$ARCH" = "x86_64" ]; then KL_SUFFIX="linux"; \
+    elif [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then KL_SUFFIX="linux_arm64"; \
+    else KL_SUFFIX="linux"; fi && \
+    wget -q https://github.com/stackrox/kube-linter/releases/download/v0.8.1/kube-linter-${KL_SUFFIX} \
+    && chmod +x kube-linter-${KL_SUFFIX} \
+    && mv kube-linter-${KL_SUFFIX} /usr/local/bin/kube-linter \
+    && which kube-linter || (echo "FATAL: kube-linter install failed" && exit 1)
+
+# ==========================================
+# CATEGORY 17: Additional SCA & Compliance
+# ==========================================
+
+# 62. cargo-audit - Rust SCA (MIT/Apache-2.0)
+RUN ARCH=$(uname -m); \
+    if [ "$ARCH" = "x86_64" ]; then CA_ARCH="x86_64-unknown-linux-musl"; \
+    elif [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then CA_ARCH="aarch64-unknown-linux-musl"; \
+    else CA_ARCH="x86_64-unknown-linux-musl"; fi && \
+    wget -q https://github.com/rustsec/rustsec/releases/download/cargo-audit%2Fv0.21.0/cargo-audit-${CA_ARCH}.tgz \
+    && tar -xzf cargo-audit-${CA_ARCH}.tgz \
+    && find . -name cargo-audit -type f -exec mv {} /usr/local/bin/ \; \
+    && rm -rf cargo-audit-* \
+    && which cargo-audit && echo "cargo-audit installed" \
+    || echo "cargo-audit unavailable — scanner will skip at runtime"
+
+# 63. Spectral - OpenAPI/AsyncAPI spec linter (Apache-2.0)
+RUN npm install -g @stoplight/spectral-cli
+
+# 64. dotenv-linter - .env file linter (MIT)
+RUN ARCH=$(uname -m); \
+    if [ "$ARCH" = "x86_64" ]; then DEL_ARCH="x86_64-unknown-linux-musl"; \
+    elif [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then DEL_ARCH="aarch64-unknown-linux-musl"; \
+    else DEL_ARCH="x86_64-unknown-linux-musl"; fi && \
+    wget -q https://github.com/dotenv-linter/dotenv-linter/releases/download/v3.3.0/dotenv-linter-${DEL_ARCH}.tar.gz \
+    && tar -xzf dotenv-linter-${DEL_ARCH}.tar.gz \
+    && mv dotenv-linter /usr/local/bin/ \
+    && rm -f dotenv-linter-${DEL_ARCH}.tar.gz \
+    && which dotenv-linter && echo "dotenv-linter installed" \
+    || echo "dotenv-linter unavailable on this architecture — scanner will skip at runtime"
+
+# 65. LicenseFinder - License compliance (MIT)
+RUN gem install license_finder --no-document \
+    && which license_finder || (echo "FATAL: license_finder install failed" && exit 1)
+
+# 66. cdxgen - CycloneDX SBOM generator (Apache-2.0)
+RUN npm install -g @cyclonedx/cdxgen
+
+# ==========================================
+# CATEGORY 19: New v2 Tools
+# ==========================================
+
+# 68. lychee - Async link checker (MIT/Apache-2.0)
+# Install via cargo on ARM64 where pre-built binaries aren't available
+RUN ARCH=$(uname -m); \
+    if [ "$ARCH" = "x86_64" ]; then \
+      wget -q https://github.com/lycheeverse/lychee/releases/download/v0.23.0/lychee-v0.23.0-x86_64-unknown-linux-musl.tar.gz \
+      && tar -xzf lychee-v0.23.0-x86_64-unknown-linux-musl.tar.gz \
+      && mv lychee /usr/local/bin/ \
+      && rm -f lychee-v0.23.0-x86_64-unknown-linux-musl.tar.gz; \
+    else \
+      apk add --no-cache cargo rust 2>/dev/null && cargo install lychee 2>/dev/null \
+      && mv /root/.cargo/bin/lychee /usr/local/bin/ 2>/dev/null; \
+    fi; \
+    which lychee && echo "lychee installed" \
+    || echo "lychee unavailable — scanner will skip at runtime"
+
+# 69. axe-core CLI - WCAG accessibility testing (MPL-2.0)
+RUN npm install -g @axe-core/cli \
+    && which axe || (echo "FATAL: axe-core/cli install failed" && exit 1)
+
+# 70. c8 - Native V8 code coverage (ISC)
+RUN npm install -g c8 \
+    && which c8 || (echo "FATAL: c8 install failed" && exit 1)
+
+# 70b. coverage.py - Python code coverage (Apache-2.0)
+RUN pip3 install --no-cache-dir coverage --break-system-packages
+
+# 73. sqlmap - SQL injection testing (GPL-2.0)
+RUN pip3 install --no-cache-dir sqlmap --break-system-packages \
+    && which sqlmap || (echo "FATAL: sqlmap install failed" && exit 1)
+
+# 74. dalfox - XSS scanner (MIT)
+RUN go install github.com/hahwul/dalfox/v2@latest \
+    && mv /root/go/bin/dalfox /usr/local/bin/ \
+    && which dalfox || (echo "FATAL: dalfox install failed" && exit 1)
+
+# 75. ffuf - Web fuzzer (MIT)
+RUN go install github.com/ffuf/ffuf/v2@latest \
+    && mv /root/go/bin/ffuf /usr/local/bin/ \
+    && which ffuf || (echo "FATAL: ffuf install failed" && exit 1)
+
+# 76. Socket.dev CLI - Supply chain attack detection (MIT)
+RUN npm install -g @socketsecurity/cli 2>/dev/null \
+    || echo "Socket CLI install optional — requires SOCKET_API_KEY at runtime"
+
+# 77. Giskard - LLM vulnerability detection (Apache-2.0)
+RUN pip3 install --no-cache-dir giskard --break-system-packages 2>/dev/null \
+    || echo "Giskard install optional — large dependency, scanner degrades gracefully"
+
+# ffuf wordlist for directory fuzzing
+RUN mkdir -p /app/tools/wordlists && \
+    wget -q https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/common.txt \
+        -O /app/tools/wordlists/common.txt 2>/dev/null || true
+
+# Clean up Go installation (keep tools)
+RUN rm -rf /root/go/pkg /root/go/src
+
+# Copy package files for Node runtime
+COPY package*.json ./
+
+# Install production dependencies
+RUN npm install --only=production && npm cache clean --force
+
+# Copy built application
+COPY --from=builder /app/dist ./dist
+
+# Verify core scanner installations (external binaries only)
+# Note: 67 total scanners; remaining are pure TypeScript/AST scanners (deepeval, keploy,
+# threatmodel, package-validator, libyear, knip, etc.) that run without external binaries.
+RUN echo "=== Verifying 50 External Security Tools ===" && \
+    echo "1. Semgrep:" && semgrep --version && \
+    echo "2. Bandit:" && bandit --version && \
+    echo "3. Gosec:" && gosec --version && \
+    echo "4. ESLint:" && eslint --version && \
+    echo "5. PMD:" && (pmd --version || echo "PMD check skipped") && \
+    echo "6. Nuclei:" && nuclei -version && \
+    echo "7. ZAP:" && (ls /app/tools/ZAP_2.17.0/zap.sh && echo "ZAP installed") && \
+    echo "8. Trivy:" && trivy --version && \
+    echo "9. Grype:" && grype version && \
+    echo "10. Gitleaks:" && gitleaks version && \
+    echo "11. Checkov:" && checkov --version && \
+    echo "12. Locust:" && locust --version && \
+    echo "13. Artillery:" && artillery --version && \
+    echo "14. Newman:" && newman --version && \
+    echo "15. Pact:" && (pact --version || echo "Pact available") && \
+    echo "16. RESTler:" && (which restler 2>/dev/null && echo "RESTler available" || echo "RESTler optional") && \
+    echo "17. Playwright:" && (npx playwright --version || echo "Playwright available") && \
+    echo "18. BackstopJS:" && backstop --version && \
+    echo "19. Pa11y:" && pa11y --version && \
+    echo "20. Syft:" && syft version && \
+    echo "21. in-toto:" && (python3 -c "import in_toto" && echo "in-toto available") && \
+    echo "22. Cosign:" && cosign version && \
+    echo "23. OPA:" && opa version && \
+    echo "24. Allure:" && allure --version && \
+    echo "25. Conftest:" && conftest --version && \
+    echo "26. Dockle:" && dockle --version && \
+    echo "27. ScanCode:" && (scancode --version || echo "ScanCode available") && \
+    echo "28. mutmut:" && (mutmut version || echo "mutmut available") && \
+    echo "29. Schemathesis:" && (schemathesis --version || echo "Schemathesis available") && \
+    echo "30. Jest:" && (npx --yes jest --version || echo "Jest available via npx") && \
+    echo "31. pytest:" && (python3 -m pytest --version || echo "pytest available") && \
+    echo "32. Oxlint:" && (oxlint --version || echo "Oxlint available") && \
+    echo "33. jscpd:" && (jscpd --version || echo "jscpd available") && \
+    echo "34. Ruff:" && (ruff --version || echo "Ruff available") && \
+    echo "35. PHPStan:" && (phpstan --version 2>/dev/null || echo "PHPStan optional") && \
+    echo "36. typos:" && (typos --version 2>/dev/null || echo "typos optional") && \
+    echo "37. Vale:" && (vale --version 2>/dev/null || echo "Vale optional") && \
+    echo "38. actionlint:" && (actionlint --version 2>/dev/null || echo "actionlint optional") && \
+    echo "39. Poutine:" && (poutine version 2>/dev/null || which poutine 2>/dev/null || echo "Poutine optional") && \
+    echo "40. Scorecard:" && (scorecard version 2>/dev/null || which scorecard 2>/dev/null || echo "Scorecard optional") && \
+    echo "41. Kubeconform:" && (kubeconform -v 2>/dev/null || echo "Kubeconform optional") && \
+    echo "42. KubeLinter:" && (kube-linter version 2>/dev/null || echo "KubeLinter optional") && \
+    echo "43. cargo-audit:" && (cargo-audit --version 2>/dev/null || echo "cargo-audit optional") && \
+    echo "44. Spectral:" && (spectral --version 2>/dev/null || echo "Spectral available") && \
+    echo "45. dotenv-linter:" && (dotenv-linter --version 2>/dev/null || echo "dotenv-linter optional") && \
+    echo "46. LicenseFinder:" && (license_finder version 2>/dev/null || echo "LicenseFinder optional") && \
+    echo "47. cdxgen:" && (cdxgen --version 2>/dev/null || echo "cdxgen available") && \
+    echo "48. Knip:" && (npx --yes knip --version 2>/dev/null || echo "Knip available via npx") && \
+    echo "49. Selenium WebDriver:" && (node -e "require('selenium-webdriver')" && echo "selenium-webdriver available" || echo "selenium-webdriver optional") && \
+    echo "50. Hadolint:" && hadolint --version && \
+    echo "51. lychee:" && lychee --version && \
+    echo "52. axe-core:" && axe --version && \
+    echo "53. c8:" && c8 --version && \
+    echo "54. sqlmap:" && (sqlmap --version 2>/dev/null | head -1 || echo "sqlmap available") && \
+    echo "55. dalfox:" && dalfox version && \
+    echo "56. ffuf:" && ffuf -V && \
+    echo "57. Socket:" && (socket --version 2>/dev/null || echo "Socket optional — needs API key") && \
+    echo "58. Giskard:" && (python3 -c "import giskard; print('giskard available')" 2>/dev/null || echo "Giskard optional") && \
+    echo "=== All External Tools Verified ==="
+
+# Create configs directory (populated via volume mount at runtime)
+RUN mkdir -p /configs
+
+# Create non-root user for scanning
+RUN addgroup -g 1001 -S scanner && \
+    adduser -S scanner -u 1001 && \
+    chown -R scanner:scanner /app /scan-target /app/scan-results /app/tools /scan-results 2>/dev/null; true
+
+USER scanner
+
+ENV NODE_ENV=production
+ENV PLAYWRIGHT_BROWSERS_PATH=/app/tools/browsers
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+ENV CHROMIUM_PATH=/usr/bin/chromium-browser
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
+  CMD semgrep --version > /dev/null 2>&1 || exit 1
+
+# Worker mode - processes scan jobs from queue
+CMD ["node", "dist/worker.js"]

@@ -1,0 +1,286 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  /* Light mode (default) */
+  :root {
+    --bg-primary: #ffffff;
+    --bg-secondary: #f9fafb;
+    --bg-tertiary: #f3f4f6;
+    --bg-hover: #e5e7eb;
+    --border-primary: #e5e7eb;
+    --border-secondary: #d1d5db;
+    --text-primary: #111827;
+    --text-secondary: #4b5563;
+    --text-tertiary: #6b7280;
+  }
+
+  /* Dark mode */
+  .dark {
+    --bg-primary: #0a0a0a;
+    --bg-secondary: #111111;
+    --bg-tertiary: #1a1a1a;
+    --bg-hover: #262626;
+    --border-primary: #262626;
+    --border-secondary: #333333;
+    --text-primary: #fafafa;
+    --text-secondary: #a1a1aa;
+    --text-tertiary: #8c8c94;
+  }
+
+  * {
+    @apply border-border-primary;
+  }
+
+  html {
+    @apply bg-bg-primary text-text-primary antialiased;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+  }
+
+  body {
+    @apply bg-bg-primary text-text-primary;
+  }
+
+  /* Focus visible styles */
+  :focus-visible {
+    @apply outline-none ring-2 ring-primary-500 ring-offset-2 ring-offset-bg-primary;
+  }
+
+  /* Scrollbar styling */
+  ::-webkit-scrollbar {
+    @apply w-2 h-2;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-bg-secondary;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-border-secondary rounded-full;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-text-tertiary;
+  }
+}
+
+@layer components {
+  /* Dashboard Cards */
+  .card {
+    @apply bg-bg-secondary border border-border-primary rounded-lg;
+  }
+
+  .card-interactive {
+    @apply card transition-all duration-200 hover:border-border-secondary hover:bg-bg-tertiary;
+  }
+
+  /* Buttons */
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-md font-medium transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-primary {
+    @apply btn bg-gradient-to-r from-primary-500 to-accent-500 text-white px-4 py-2 hover:opacity-90 hover:shadow-lg hover:shadow-primary-500/25;
+  }
+
+  .btn-secondary {
+    @apply btn bg-transparent border border-border-secondary text-text-primary px-4 py-2 hover:bg-bg-hover hover:border-primary-500;
+  }
+
+  .btn-ghost {
+    @apply btn bg-transparent text-text-secondary px-3 py-2 hover:text-text-primary hover:bg-bg-hover;
+  }
+
+  .btn-danger {
+    @apply btn bg-error/10 text-error px-4 py-2 hover:bg-error/20;
+  }
+
+  .btn-sm {
+    @apply px-3 py-1.5 text-sm;
+  }
+
+  .btn-lg {
+    @apply px-6 py-3 text-lg;
+  }
+
+  .btn-icon {
+    @apply btn p-2 hover:bg-bg-hover;
+  }
+
+  /* Inputs */
+  .input {
+    @apply w-full bg-bg-tertiary border border-border-primary rounded-md px-3 py-2 text-text-primary placeholder:text-text-tertiary focus:border-primary-500 focus:ring-1 focus:ring-primary-500 transition-colors;
+  }
+
+  .input-error {
+    @apply border-error focus:border-error focus:ring-error;
+  }
+
+  .label {
+    @apply block text-sm font-medium text-text-secondary mb-1.5;
+  }
+
+  /* Badges */
+  .badge {
+    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium;
+  }
+
+  .badge-success {
+    @apply badge bg-success/10 text-success;
+  }
+
+  .badge-warning {
+    @apply badge bg-warning/10 text-warning;
+  }
+
+  .badge-error {
+    @apply badge bg-error/10 text-error;
+  }
+
+  .badge-info {
+    @apply badge bg-info/10 text-info;
+  }
+
+  .badge-neutral {
+    @apply badge bg-bg-tertiary text-text-secondary;
+  }
+
+  /* Score Badges */
+  .score-excellent {
+    @apply bg-success/10 text-success border-success/30;
+  }
+
+  .score-good {
+    @apply bg-success/10 text-success border-success/30;
+  }
+
+  .score-medium {
+    @apply bg-warning/10 text-warning border-warning/30;
+  }
+
+  .score-high {
+    @apply bg-orange-500/10 text-orange-500 border-orange-500/30;
+  }
+
+  .score-critical {
+    @apply bg-error/10 text-error border-error/30;
+  }
+
+  /* Tables */
+  .table {
+    @apply w-full text-left text-sm;
+  }
+
+  .table th {
+    @apply px-4 py-3 text-text-tertiary font-medium border-b border-border-primary;
+  }
+
+  .table td {
+    @apply px-4 py-3 border-b border-border-primary;
+  }
+
+  .table tr:hover td {
+    @apply bg-bg-hover;
+  }
+
+  /* Skeleton loading */
+  .skeleton {
+    @apply bg-bg-tertiary rounded animate-skeleton bg-[length:200%_100%] bg-skeleton;
+  }
+
+  /* Text gradient */
+  .text-gradient {
+    @apply bg-gradient-to-r from-primary-400 to-accent-400 bg-clip-text text-transparent;
+  }
+
+  /* Stat card */
+  .stat-card {
+    @apply card p-5;
+  }
+
+  .stat-value {
+    @apply text-2xl font-semibold text-text-primary;
+  }
+
+  .stat-label {
+    @apply text-sm text-text-secondary mt-1;
+  }
+
+  .stat-change-up {
+    @apply text-success text-sm font-medium;
+  }
+
+  .stat-change-down {
+    @apply text-error text-sm font-medium;
+  }
+
+  /* Dropdown/Menu */
+  .dropdown-menu {
+    @apply bg-bg-secondary border border-border-primary rounded-lg shadow-xl py-1 min-w-[160px];
+  }
+
+  .dropdown-item {
+    @apply flex items-center gap-2 px-3 py-2 text-sm text-text-secondary hover:bg-bg-hover hover:text-text-primary cursor-pointer transition-colors;
+  }
+
+  .dropdown-item-danger {
+    @apply dropdown-item text-error hover:bg-error/10;
+  }
+
+  /* Tabs */
+  .tabs {
+    @apply flex border-b border-border-primary;
+  }
+
+  .tab {
+    @apply px-4 py-2 text-sm font-medium text-text-tertiary hover:text-text-secondary transition-colors border-b-2 border-transparent -mb-px;
+  }
+
+  .tab-active {
+    @apply tab text-primary-500 border-primary-500;
+  }
+
+  /* Modal */
+  .modal-overlay {
+    @apply fixed inset-0 bg-black/60 backdrop-blur-sm z-50;
+  }
+
+  .modal-content {
+    @apply fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-bg-secondary border border-border-primary rounded-xl shadow-2xl z-50 w-full max-w-lg max-h-[85vh] overflow-auto;
+  }
+
+  /* Toast/Alert */
+  .toast {
+    @apply fixed bottom-4 right-4 bg-bg-secondary border border-border-primary rounded-lg p-4 shadow-xl min-w-[300px] animate-slide-in-right z-50;
+  }
+
+  .toast-success {
+    @apply toast border-l-4 border-l-success;
+  }
+
+  .toast-error {
+    @apply toast border-l-4 border-l-error;
+  }
+
+  .toast-warning {
+    @apply toast border-l-4 border-l-warning;
+  }
+
+  /* Empty state */
+  .empty-state {
+    @apply flex flex-col items-center justify-center py-12 px-4 text-center;
+  }
+
+  .empty-state-icon {
+    @apply w-12 h-12 text-text-tertiary mb-4;
+  }
+
+  .empty-state-title {
+    @apply text-lg font-medium text-text-primary mb-2;
+  }
+
+  .empty-state-description {
+    @apply text-sm text-text-secondary max-w-sm;
+  }
+}

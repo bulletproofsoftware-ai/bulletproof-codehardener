@@ -1,0 +1,126 @@
+{
+  "$schema": "https://json.schemastore.org/eslintrc.json",
+  "_comment": "Code Hardener - ESLint Security Configuration. Extends eslint-plugin-security and eslint-plugin-no-unsanitized for comprehensive JS/TS security linting.",
+  "env": {
+    "browser": true,
+    "node": true,
+    "es2022": true
+  },
+  "plugins": [
+    "security",
+    "no-unsanitized"
+  ],
+  "extends": [
+    "plugin:security/recommended"
+  ],
+  "rules": {
+    "security/detect-eval-with-expression": "error",
+    "security/detect-non-literal-fs-filename": "error",
+    "security/detect-non-literal-regexp": "error",
+    "security/detect-non-literal-require": "error",
+    "security/detect-possible-timing-attacks": "error",
+    "security/detect-no-csrf-before-method-override": "error",
+    "security/detect-object-injection": "warn",
+    "security/detect-child-process": "error",
+    "security/detect-disable-mustache-escape": "error",
+    "security/detect-new-buffer": "error",
+    "security/detect-unsafe-regex": "error",
+    "security/detect-buffer-noassert": "error",
+    "security/detect-pseudoRandomBytes": "error",
+    "security/detect-bidi-characters": "error",
+
+    "no-unsanitized/method": "error",
+    "no-unsanitized/property": "error",
+
+    "no-eval": "error",
+    "no-implied-eval": "error",
+    "no-new-func": "error",
+    "no-script-url": "error",
+
+    "no-restricted-globals": [
+      "error",
+      {
+        "name": "eval",
+        "message": "Arbitrary code execution risk. Use safe alternatives."
+      },
+      {
+        "name": "Function",
+        "message": "Function() constructor enables dynamic code execution. Use safe alternatives."
+      }
+    ],
+
+    "no-restricted-properties": [
+      "error",
+      {
+        "object": "document",
+        "property": "write",
+        "message": "document.write() can introduce XSS vulnerabilities. Use DOM manipulation methods."
+      },
+      {
+        "object": "document",
+        "property": "writeln",
+        "message": "document.writeln() can introduce XSS vulnerabilities. Use DOM manipulation methods."
+      },
+      {
+        "property": "__proto__",
+        "message": "Mutating __proto__ is a prototype pollution vector. Use Object.create() or Object.setPrototypeOf()."
+      }
+    ],
+
+    "no-restricted-syntax": [
+      "error",
+      {
+        "selector": "CallExpression[callee.property.name='dangerouslySetInnerHTML']",
+        "message": "Bypasses React XSS protection. Sanitize with DOMPurify if unavoidable."
+      },
+      {
+        "selector": "MemberExpression[property.name='innerHTML']",
+        "message": "Direct innerHTML assignment is an XSS vector. Use textContent or sanitize with DOMPurify."
+      },
+      {
+        "selector": "MemberExpression[property.name='outerHTML']",
+        "message": "Direct outerHTML assignment is an XSS vector. Use DOM manipulation methods."
+      },
+      {
+        "selector": "CallExpression[callee.property.name='insertAdjacentHTML']",
+        "message": "insertAdjacentHTML can introduce XSS. Sanitize input with DOMPurify."
+      }
+    ]
+  },
+  "overrides": [
+    {
+      "files": [
+        "**/*.test.js",
+        "**/*.test.ts",
+        "**/*.spec.js",
+        "**/*.spec.ts",
+        "**/__tests__/**",
+        "**/__mocks__/**",
+        "**/test/**",
+        "**/tests/**",
+        "**/fixtures/**"
+      ],
+      "rules": {
+        "security/detect-object-injection": "off",
+        "security/detect-non-literal-fs-filename": "off",
+        "security/detect-non-literal-require": "off",
+        "security/detect-possible-timing-attacks": "off",
+        "no-restricted-syntax": "off"
+      }
+    },
+    {
+      "files": [
+        "**/*.config.js",
+        "**/*.config.ts",
+        "**/webpack.*.js",
+        "**/rollup.*.js",
+        "**/vite.config.*",
+        "**/next.config.*"
+      ],
+      "rules": {
+        "security/detect-non-literal-require": "off",
+        "security/detect-non-literal-fs-filename": "off"
+      }
+    }
+  ]
+}

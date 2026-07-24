@@ -1,0 +1,59 @@
+{
+  "name": "Git Push → Code Hardener Scan",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "git-push-scan",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "trigger-git-push",
+      "name": "Webhook (git push)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [240, 300],
+      "webhookId": "git-push-scan"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Normalize incoming GitHub-style push payload into a scan request\nconst body = $json.body || $json;\nconst projectId = body.project_id || body.repository?.full_name || body.repository?.name || 'unknown';\nconst branch = (body.ref || 'refs/heads/main').replace('refs/heads/', '');\nconst commitSha = body.head_commit?.id || body.after || 'HEAD';\nconst userId = body.pusher?.email || body.sender?.login || 'system';\n\nreturn {\n  scanId: `push-${projectId.replace(/[^a-z0-9]/gi,'_')}-${commitSha.slice(0,8)}-${Date.now()}`,\n  projectId,\n  userId,\n  scanner: body.scanner || 'semgrep',\n  branch,\n  profile: body.profile || 'standard',\n  commit_sha: commitSha,\n  trigger: 'git.push'\n};"
+      },
+      "id": "normalize-push",
+      "name": "Normalize push payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://codehardener-backend-1:4000/internal/scanners/execute",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "x-internal-api-key", "value": "={{$env.CODEHARDENER_INTERNAL_API_KEY || 'dev-internal-key-change-in-production'}}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "call-scanner",
+      "name": "Execute scanner",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 300]
+    }
+  ],
+  "connections": {
+    "Webhook (git push)": { "main": [[{ "node": "Normalize push payload", "type": "main", "index": 0 }]] },
+    "Normalize push payload": { "main": [[{ "node": "Execute scanner", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "active": false
+}

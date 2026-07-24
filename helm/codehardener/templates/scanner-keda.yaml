@@ -1,0 +1,37 @@
+{{- if .Values.scanner.keda.enabled }}
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: {{ include "codehardener.scanner.fullname" . }}
+  labels:
+    {{- include "codehardener.labels" . | nindent 4 }}
+    app.kubernetes.io/component: scanner
+spec:
+  scaleTargetRef:
+    name: {{ include "codehardener.scanner.fullname" . }}
+  minReplicaCount: {{ .Values.scanner.keda.minReplicaCount }}
+  maxReplicaCount: {{ .Values.scanner.keda.maxReplicaCount }}
+  pollingInterval: {{ .Values.scanner.keda.pollingInterval }}
+  cooldownPeriod: {{ .Values.scanner.keda.cooldownPeriod }}
+  triggers:
+    {{- range .Values.scanner.keda.triggers }}
+    - type: {{ .type }}
+      metadata:
+        {{- range $key, $value := .metadata }}
+        {{ $key }}: {{ $value | quote }}
+        {{- end }}
+        address: {{ $.Release.Name }}-redis-master:6379
+      authenticationRef:
+        name: {{ include "codehardener.fullname" $ }}-redis-auth
+    {{- end }}
+---
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: {{ include "codehardener.fullname" . }}-redis-auth
+spec:
+  secretTargetRef:
+    - parameter: password
+      name: codehardener-secrets
+      key: redis-password
+{{- end }}

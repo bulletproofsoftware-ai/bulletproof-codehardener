@@ -1,0 +1,116 @@
+{{- if .Values.networkPolicy.enabled }}
+# Backend: allow ingress from ingress controller, scanner, n8n
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "codehardener.backend.fullname" . }}
+  labels:
+    {{- include "codehardener.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: backend
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        # Ingress controller
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ingress-nginx
+        # Scanner workers
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: scanner
+        # n8n
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: n8n
+      ports:
+        - port: {{ .Values.backend.service.port }}
+          protocol: TCP
+  egress:
+    - {} # Allow all egress (backend needs DB, Redis, external APIs)
+---
+# Scanner: no ingress, egress to DB/Redis/internet
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "codehardener.scanner.fullname" . }}
+  labels:
+    {{- include "codehardener.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: scanner
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress: [] # No inbound traffic
+  egress:
+    - to:
+        # PostgreSQL
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: primary
+        # Redis
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: master
+      ports:
+        - port: 5432
+          protocol: TCP
+        - port: 6379
+          protocol: TCP
+    - to:
+        # Allow cloning repos from external
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+      ports:
+        - port: 443
+          protocol: TCP
+        - port: 22
+          protocol: TCP
+---
+# Dashboard: ingress from ingress controller only
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "codehardener.dashboard.fullname" . }}
+  labels:
+    {{- include "codehardener.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: dashboard
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ingress-nginx
+      ports:
+        - port: {{ .Values.dashboard.service.port }}
+          protocol: TCP
+  egress:
+    - to:
+        # Backend API
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: backend
+      ports:
+        - port: {{ .Values.backend.service.port }}
+          protocol: TCP
+{{- end }}

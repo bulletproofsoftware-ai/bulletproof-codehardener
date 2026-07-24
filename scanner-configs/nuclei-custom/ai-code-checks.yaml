@@ -1,0 +1,401 @@
+id: ai-code-exposure-checks
+
+info:
+  name: AI-Generated Code Exposure Checks
+  author: ai-hardener
+  severity: high
+  description: |
+    Detects common security exposures in AI-generated web applications,
+    including leaked configuration files, exposed debug endpoints,
+    version control artifacts, and default credentials.
+  tags: ai-code,exposure,misconfiguration,default-credentials
+  reference:
+    - https://owasp.org/Top10/A05_2021-Security_Misconfiguration/
+    - https://cwe.mitre.org/data/definitions/200.html
+
+# Exposed .env Files
+
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/.env"
+      - "{{BaseURL}}/.env.local"
+      - "{{BaseURL}}/.env.production"
+      - "{{BaseURL}}/.env.development"
+      - "{{BaseURL}}/.env.staging"
+      - "{{BaseURL}}/.env.backup"
+      - "{{BaseURL}}/env"
+      - "{{BaseURL}}/app/.env"
+      - "{{BaseURL}}/config/.env"
+    matchers-condition: or
+    matchers:
+      - type: word
+        words:
+          - "DB_PASSWORD"
+          - "DATABASE_URL"
+          - "API_KEY"
+          - "SECRET_KEY"
+          - "AWS_ACCESS"
+          - "OPENAI_API_KEY"
+          - "ANTHROPIC_API_KEY"
+          - "JWT_SECRET"
+          - "STRIPE_SECRET"
+        condition: or
+      - type: regex
+        regex:
+          - '(?i)(password|secret|token|api_key)\s*=\s*[^\s]+'
+          - '(?i)(postgres|mysql|mongodb)://[^:]+:[^@]+@'
+    extractors:
+      - type: regex
+        group: 1
+        regex:
+          - '(?i)([A-Z_]+=.{1,5}).*'
+
+---
+
+id: exposed-git-directory
+
+info:
+  name: Exposed Git Directory
+  author: ai-hardener
+  severity: critical
+  description: |
+    Detects exposed .git directories that allow full source code download
+    and may contain hardcoded secrets in commit history.
+  tags: ai-code,exposure,git,source-code
+  reference:
+    - https://cwe.mitre.org/data/definitions/538.html
+
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/.git/HEAD"
+      - "{{BaseURL}}/.git/config"
+      - "{{BaseURL}}/.gitignore"
+      - "{{BaseURL}}/.git/refs/heads/main"
+      - "{{BaseURL}}/.git/refs/heads/master"
+    matchers-condition: or
+    matchers:
+      - type: word
+        words:
+          - "ref: refs/heads/"
+        part: body
+        condition: or
+      - type: word
+        words:
+          - "[core]"
+          - "[remote"
+          - "repositoryformatversion"
+        part: body
+        condition: or
+      - type: regex
+        regex:
+          - '^[a-f0-9]{40}$'
+        part: body
+
+---
+
+id: debug-endpoints-exposed
+
+info:
+  name: Debug Endpoints Exposed
+  author: ai-hardener
+  severity: high
+  description: |
+    Detects debug endpoints commonly left enabled by AI code generators.
+    These endpoints can leak internal state, configuration, environment
+    variables, and application internals.
+  tags: ai-code,debug,misconfiguration,information-disclosure
+  reference:
+    - https://cwe.mitre.org/data/definitions/215.html
+
+http:
+  - method: GET
+    path:
+      # Node.js / Express debug endpoints
+      - "{{BaseURL}}/debug"
+      - "{{BaseURL}}/debug/vars"
+      - "{{BaseURL}}/debug/pprof"
+      - "{{BaseURL}}/_debug"
+      - "{{BaseURL}}/api/debug"
+
+      # Status and health with excessive information
+      - "{{BaseURL}}/status"
+      - "{{BaseURL}}/_status"
+      - "{{BaseURL}}/server-status"
+      - "{{BaseURL}}/server-info"
+
+      # Framework-specific debug endpoints
+      - "{{BaseURL}}/__nextjs_original-stack-frame"
+      - "{{BaseURL}}/_next/development"
+      - "{{BaseURL}}/__webpack_hmr"
+      - "{{BaseURL}}/sockjs-node"
+
+      # PHP info / debug
+      - "{{BaseURL}}/phpinfo.php"
+      - "{{BaseURL}}/info.php"
+
+      # Python framework debug
+      - "{{BaseURL}}/__debug__/"
+      - "{{BaseURL}}/__debug__/sql/"
+
+      # GraphQL introspection
+      - "{{BaseURL}}/graphql?query={__schema{types{name}}}"
+      - "{{BaseURL}}/graphiql"
+
+      # Actuator endpoints (Spring Boot)
+      - "{{BaseURL}}/actuator"
+      - "{{BaseURL}}/actuator/env"
+      - "{{BaseURL}}/actuator/configprops"
+      - "{{BaseURL}}/actuator/heapdump"
+      - "{{BaseURL}}/actuator/mappings"
+
+      # Environment variable exposure
+      - "{{BaseURL}}/env"
+      - "{{BaseURL}}/config"
+      - "{{BaseURL}}/api/config"
+      - "{{BaseURL}}/api/env"
+
+      # Swagger/OpenAPI (may expose internal APIs)
+      - "{{BaseURL}}/swagger-ui.html"
+      - "{{BaseURL}}/swagger.json"
+      - "{{BaseURL}}/api-docs"
+      - "{{BaseURL}}/v2/api-docs"
+      - "{{BaseURL}}/v3/api-docs"
+
+    matchers-condition: and
+    matchers:
+      - type: status
+        status:
+          - 200
+      - type: word
+        words:
+          - "debug"
+          - "environment"
+          - "config"
+          - "variables"
+          - "stack"
+          - "trace"
+          - "phpinfo"
+          - "actuator"
+          - "swagger"
+          - "__schema"
+          - "graphiql"
+          - "DATABASE"
+          - "SECRET"
+        condition: or
+        part: body
+
+---
+
+id: default-credentials-check
+
+info:
+  name: Default Credentials on Common Frameworks
+  author: ai-hardener
+  severity: critical
+  description: |
+    Checks for default credentials on admin panels, databases,
+    and management interfaces commonly deployed by AI-generated code
+    without changing defaults.
+  tags: ai-code,default-credentials,authentication,brute-force
+  reference:
+    - https://cwe.mitre.org/data/definitions/798.html
+    - https://owasp.org/Top10/A07_2021-Identification_and_Authentication_Failures/
+
+http:
+  # Admin panel default logins
+  - method: POST
+    path:
+      - "{{BaseURL}}/admin/login"
+      - "{{BaseURL}}/api/auth/login"
+      - "{{BaseURL}}/auth/login"
+      - "{{BaseURL}}/login"
+      - "{{BaseURL}}/api/login"
+    headers:
+      Content-Type: application/json
+    body: '{"username":"admin","password":"admin"}'
+    matchers-condition: and
+    matchers:
+      - type: status
+        status:
+          - 200
+      - type: word
+        words:
+          - "token"
+          - "session"
+          - "access_token"
+          - "jwt"
+          - "authenticated"
+          - "success"
+        condition: or
+        part: body
+      - type: word
+        words:
+          - "Invalid"
+          - "Unauthorized"
+          - "incorrect"
+          - "failed"
+          - "denied"
+        negative: true
+        condition: and
+        part: body
+
+  - method: POST
+    path:
+      - "{{BaseURL}}/admin/login"
+      - "{{BaseURL}}/api/auth/login"
+      - "{{BaseURL}}/auth/login"
+      - "{{BaseURL}}/login"
+      - "{{BaseURL}}/api/login"
+    headers:
+      Content-Type: application/json
+    body: '{"email":"admin@admin.com","password":"password"}'
+    matchers-condition: and
+    matchers:
+      - type: status
+        status:
+          - 200
+      - type: word
+        words:
+          - "token"
+          - "session"
+          - "access_token"
+          - "jwt"
+          - "authenticated"
+          - "success"
+        condition: or
+        part: body
+      - type: word
+        words:
+          - "Invalid"
+          - "Unauthorized"
+          - "incorrect"
+          - "failed"
+          - "denied"
+        negative: true
+        condition: and
+        part: body
+
+  - method: POST
+    path:
+      - "{{BaseURL}}/admin/login"
+      - "{{BaseURL}}/api/auth/login"
+      - "{{BaseURL}}/auth/login"
+      - "{{BaseURL}}/login"
+      - "{{BaseURL}}/api/login"
+    headers:
+      Content-Type: application/json
+    body: '{"username":"admin","password":"password123"}'
+    matchers-condition: and
+    matchers:
+      - type: status
+        status:
+          - 200
+      - type: word
+        words:
+          - "token"
+          - "session"
+          - "access_token"
+          - "jwt"
+          - "authenticated"
+          - "success"
+        condition: or
+        part: body
+      - type: word
+        words:
+          - "Invalid"
+          - "Unauthorized"
+          - "incorrect"
+          - "failed"
+          - "denied"
+        negative: true
+        condition: and
+        part: body
+
+---
+
+id: source-map-exposure
+
+info:
+  name: JavaScript Source Map Files Exposed
+  author: ai-hardener
+  severity: medium
+  description: |
+    Detects exposed JavaScript source map files that can reveal original
+    source code, including server-side code bundled by AI tools.
+  tags: ai-code,exposure,source-map,information-disclosure
+  reference:
+    - https://cwe.mitre.org/data/definitions/540.html
+
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/main.js.map"
+      - "{{BaseURL}}/app.js.map"
+      - "{{BaseURL}}/bundle.js.map"
+      - "{{BaseURL}}/static/js/main.js.map"
+      - "{{BaseURL}}/_next/static/chunks/main.js.map"
+      - "{{BaseURL}}/assets/index.js.map"
+      - "{{BaseURL}}/dist/main.js.map"
+    matchers-condition: and
+    matchers:
+      - type: status
+        status:
+          - 200
+      - type: word
+        words:
+          - '"version"'
+          - '"sources"'
+          - '"mappings"'
+        condition: and
+        part: body
+
+---
+
+id: package-json-exposure
+
+info:
+  name: Package.json / Dependency Files Exposed
+  author: ai-hardener
+  severity: medium
+  description: |
+    Detects exposed package manifest files that reveal dependency versions,
+    potentially aiding in identifying known vulnerable components.
+  tags: ai-code,exposure,dependencies,information-disclosure
+  reference:
+    - https://cwe.mitre.org/data/definitions/200.html
+
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/package.json"
+      - "{{BaseURL}}/package-lock.json"
+      - "{{BaseURL}}/yarn.lock"
+      - "{{BaseURL}}/composer.json"
+      - "{{BaseURL}}/composer.lock"
+      - "{{BaseURL}}/Gemfile"
+      - "{{BaseURL}}/Gemfile.lock"
+      - "{{BaseURL}}/requirements.txt"
+      - "{{BaseURL}}/Pipfile"
+      - "{{BaseURL}}/Pipfile.lock"
+      - "{{BaseURL}}/go.sum"
+      - "{{BaseURL}}/go.mod"
+      - "{{BaseURL}}/pom.xml"
+      - "{{BaseURL}}/build.gradle"
+    matchers-condition: and
+    matchers:
+      - type: status
+        status:
+          - 200
+      - type: word
+        words:
+          - "dependencies"
+          - "devDependencies"
+          - "require"
+          - "packages"
+          - "module"
+          - "gem"
+          - "source"
+        condition: or
+        part: body

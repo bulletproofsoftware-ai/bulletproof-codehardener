@@ -1,0 +1,24 @@
+{
+  "name": "@codehardener/cli",
+  "version": "0.1.0",
+  "description": "Code Hardener CLI — security scanning from your terminal",
+  "type": "module",
+  "bin": {
+    "codehardener": "./dist/index.js",
+    "ch": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/index.ts"
+  },
+  "keywords": ["security", "scanning", "cli", "vulnerability", "sast", "sca"],
+  "license": "Apache-2.0",
+  "dependencies": {
+    "commander": "^12.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "tsx": "^4.7.0",
+    "@types/node": "^20.0.0"
+  }
+}

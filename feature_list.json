@@ -1,0 +1,142 @@
+{
+  "project": "Code Hardener",
+  "version": "1.0.0",
+  "created": "2025-12-23",
+  "description": "Security assurance platform for AI-first developers",
+  "deployment": {
+    "type": "docker-compose",
+    "containers": [
+      "backend-api",
+      "marketing-site",
+      "user-dashboard"
+    ]
+  },
+  "features": [
+    {
+      "id": "INFRA-001",
+      "name": "Docker Infrastructure",
+      "description": "Docker Compose configuration with three containers: backend API, marketing site, user dashboard",
+      "status": "pending",
+      "passes": false,
+      "priority": "critical",
+      "spec_file": "TODO/01-docker-infrastructure.md"
+    },
+    {
+      "id": "API-001",
+      "name": "Backend API Core",
+      "description": "Node.js/TypeScript backend with PostgreSQL, authentication, and core endpoints",
+      "status": "pending",
+      "passes": false,
+      "priority": "critical",
+      "spec_file": "TODO/02-backend-api-core.md"
+    },
+    {
+      "id": "API-002",
+      "name": "Scan API Endpoints",
+      "description": "REST API endpoints for security scanning operations",
+      "status": "pending",
+      "passes": false,
+      "priority": "high",
+      "spec_file": "TODO/03-scan-api-endpoints.md"
+    },
+    {
+      "id": "API-003",
+      "name": "Attestation API",
+      "description": "Cryptographic attestation generation and verification endpoints",
+      "status": "pending",
+      "passes": false,
+      "priority": "high",
+      "spec_file": "TODO/04-attestation-api.md"
+    },
+    {
+      "id": "MARKETING-001",
+      "name": "Marketing Site - Homepage",
+      "description": "Landing page with hero, features, pricing, testimonials, CTA",
+      "status": "pending",
+      "passes": false,
+      "priority": "critical",
+      "spec_file": "TODO/05-marketing-homepage.md"
+    },
+    {
+      "id": "MARKETING-002",
+      "name": "Marketing Site - Features Page",
+      "description": "Detailed features breakdown with 27 security tools",
+      "status": "pending",
+      "passes": false,
+      "priority": "high",
+      "spec_file": "TODO/06-marketing-features.md"
+    },
+    {
+      "id": "MARKETING-003",
+      "name": "Marketing Site - Pricing Page",
+      "description": "Pricing tiers with comparison table and FAQ",
+      "status": "pending",
+      "passes": false,
+      "priority": "high",
+      "spec_file": "TODO/07-marketing-pricing.md"
+    },
+    {
+      "id": "MARKETING-004",
+      "name": "Marketing Site - Documentation",
+      "description": "Documentation hub with getting started, API docs, integrations",
+      "status": "pending",
+      "passes": false,
+      "priority": "medium",
+      "spec_file": "TODO/08-marketing-docs.md"
+    },
+    {
+      "id": "MARKETING-005",
+      "name": "Marketing Site - Auth Pages",
+      "description": "Login, signup, password reset pages",
+      "status": "pending",
+      "passes": false,
+      "priority": "critical",
+      "spec_file": "TODO/09-marketing-auth.md"
+    },
+    {
+      "id": "DASHBOARD-001",
+      "name": "Dashboard - Overview",
+      "description": "Main dashboard with security score, recent scans, quick actions",
+      "status": "pending",
+      "passes": false,
+      "priority": "critical",
+      "spec_file": "TODO/10-dashboard-overview.md"
+    },
+    {
+      "id": "DASHBOARD-002",
+      "name": "Dashboard - Projects",
+      "description": "Project listing, creation, and management",
+      "status": "pending",
+      "passes": false,
+      "priority": "high",
+      "spec_file": "TODO/11-dashboard-projects.md"
+    },
+    {
+      "id": "DASHBOARD-003",
+      "name": "Dashboard - Scan Details",
+      "description": "Individual scan results with findings, fixes, attestations",
+      "status": "pending",
+      "passes": false,
+      "priority": "high",
+      "spec_file": "TODO/12-dashboard-scan-details.md"
+    },
+    {
+      "id": "DASHBOARD-004",
+      "name": "Dashboard - Settings",
+      "description": "User settings, API keys, integrations, team management",
+      "status": "pending",
+      "passes": false,
+      "priority": "medium",
+      "spec_file": "TODO/13-dashboard-settings.md"
+    },
+    {
+      "id": "DASHBOARD-005",
+      "name": "Dashboard - Policies",
+      "description": "Policy management with YAML/Rego editor",
+      "status": "pending",
+      "passes": false,
+      "priority": "medium",
+      "spec_file": "TODO/14-dashboard-policies.md"
+    }
+  ]
+}
