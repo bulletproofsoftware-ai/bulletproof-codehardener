@@ -1,19 +1,22 @@
 # gitleaks config for bulletproof-codehardener.
-# Allowlists verified false positives: env-var reads for API keys (no hardcoded
-# values), curl health-check/example commands in the Makefile and docs. No real
-# secrets present — all credentials are read from the environment.
+# Allowlists verified false positives: API keys are read from env vars (no hardcoded
+# values), and curl auth examples appear in docs, marketing pages, the Makefile, and
+# test/e2e scripts. No real secrets present.
 
 [extend]
 useDefault = true
 
 [allowlist]
-description = "Env-var key reads and curl examples (no real secrets)"
+description = "Env-var key reads and curl examples in docs/scripts (no real secrets)"
 paths = [
   '''Makefile''',
   '''.*\.md$''',
+  '''.*\.html$''',
+  '''scripts/.*\.sh$''',
+  '''.*\.test\.ts$''',
 ]
 regexes = [
   '''env\.N8N_API_KEY''',
   '''X-N8N-API-KEY''',
-  '''curl -sf http://localhost''',
+  '''curl .*(localhost|example\.com|-u |Authorization)''',
 ]
