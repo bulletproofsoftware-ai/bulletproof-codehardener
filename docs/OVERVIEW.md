@@ -50,7 +50,6 @@ Components that actually ship in this repository:
 | Backend API + MCP server | `backend/` | Express API (`/api/v1`) and the MCP stdio/SSE server. TypeScript. |
 | Scanner worker | `backend/src/worker.ts`, `backend/Dockerfile.scanner` | BullMQ worker that runs the tools inside a hardened container. |
 | Dashboard | `dashboard/` | Next.js UI for projects, scans, findings, and scores. |
-| Marketing site | `marketing/` | Next.js public site. |
 | CLI | `cli/` | Command-line client. |
 | SDKs | `sdks/node`, `sdks/python`, `sdks/go` | Official client libraries. |
 | n8n workflows / templates | `n8n-workflows/`, `n8n-templates/` | Automation definitions. |

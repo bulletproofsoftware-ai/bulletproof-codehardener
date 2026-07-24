@@ -42,17 +42,17 @@ Code Hardener is a security assurance platform designed for AI-first developers.
               |   Load Balancer  |  (TLS termination, rate limiting)
               +--------+---------+
                        |
-         +-------------+-------------+
-         |             |             |
-         v             v             v
-    +---------+   +---------+   +---------+
-    |Marketing|   |Dashboard|   | Backend |
-    |  :3000  |   |  :3001  |   |  :4000  |
-    +---------+   +---------+   +----+----+
-                                     |
-                    +----------------+----------------+
-                    |                                 |
-                    v                                 v
+              +------+------+
+              |             |
+              v             v
+         +---------+   +---------+
+         |Dashboard|   | Backend |
+         |  :3001  |   |  :4000  |
+         +---------+   +----+----+
+                            |
+                    +-------+--------+
+                    |                |
+                    v                v
               +----------+                    +----------+
               | Scanner  |                    |PostgreSQL|
               |Containers|                    |  :5432   |
@@ -63,7 +63,6 @@ Code Hardener is a security assurance platform designed for AI-first developers.
 
 | Component | Technology | Port | Purpose |
 |-----------|------------|------|---------|
-| Marketing Site | Next.js 15 | 3000 | Public website, documentation |
 | Dashboard | Next.js 15 | 3001 | User interface for scans/findings |
 | Backend API | Node.js/Express | 4000 | REST API, authentication, scan orchestration |
 | Database | PostgreSQL 16 | 5432 | Persistent data storage |
@@ -193,14 +192,10 @@ docker-compose ps
 # NAME                 STATUS         PORTS
 # codehardener-db        Up (healthy)   0.0.0.0:5432->5432/tcp
 # codehardener-api       Up (healthy)   0.0.0.0:4000->4000/tcp
-# codehardener-marketing Up             0.0.0.0:3000->3000/tcp
 # codehardener-dashboard Up             0.0.0.0:3001->3001/tcp
 
 # Test API health
 curl http://localhost:4000/health
-
-# Test marketing site
-curl -I http://localhost:3000
 
 # Test dashboard
 curl -I http://localhost:3001
@@ -237,7 +232,6 @@ curl -I http://localhost:3001
 
 ```bash
 NEXT_PUBLIC_API_URL=https://api.yourdomain.com
-NEXT_PUBLIC_MARKETING_URL=https://yourdomain.com
 NEXT_PUBLIC_DASHBOARD_URL=https://app.yourdomain.com
 ```
 
@@ -308,7 +302,6 @@ docker-compose pull
 
 # Deploy with zero downtime
 docker-compose up -d --no-deps --build backend
-docker-compose up -d --no-deps --build marketing
 docker-compose up -d --no-deps --build dashboard
 ```
 
@@ -327,10 +320,6 @@ docker stack deploy -c docker-compose.yml codehardener
 ```nginx
 # /etc/nginx/sites-available/codehardener
 
-upstream marketing {
-    server 127.0.0.1:3000;
-}
-
 upstream dashboard {
     server 127.0.0.1:3001;
 }
@@ -339,30 +328,6 @@ upstream api {
     server 127.0.0.1:4000;
 }
 
-# Marketing site
-server {
-    listen 443 ssl http2;
-    server_name yourdomain.com www.yourdomain.com;
-
-    ssl_certificate /etc/letsencrypt/live/yourdomain.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/yourdomain.com/privkey.pem;
-
-    # Security headers
-    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload" always;
-    add_header X-Content-Type-Options "nosniff" always;
-    add_header X-Frame-Options "DENY" always;
-    add_header X-XSS-Protection "0" always;
-    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
-
-    location / {
-        proxy_pass http://marketing;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host $host;
-        proxy_cache_bypass $http_upgrade;
-    }
-}
 
 # Dashboard
 server {
@@ -604,7 +569,7 @@ Add to crontab:
 
 ```bash
 # Stop application
-docker-compose stop backend marketing dashboard
+docker-compose stop backend dashboard
 
 # Restore from backup
 docker exec -i codehardener-db pg_restore -U codehardener -d codehardener --clean < /backups/codehardener/backup-YYYYMMDD-HHMMSS.dump
@@ -811,9 +776,6 @@ docker-compose up -d
 # Backend
 cd backend && npm update && npm audit fix
 
-# Marketing
-cd marketing && npm update && npm audit fix
-
 # Dashboard
 cd dashboard && npm update && npm audit fix
 ```
@@ -883,7 +845,6 @@ codehardener/
 │   │   └── index.ts      # Entry point
 │   ├── Dockerfile
 │   └── package.json
-├── marketing/            # Next.js marketing site
 │   ├── src/app/          # App router pages
 │   ├── src/components/   # React components
 │   ├── Dockerfile

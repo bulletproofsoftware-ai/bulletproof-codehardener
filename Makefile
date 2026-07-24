@@ -12,7 +12,6 @@
         up-all up-security up-performance up-api-testing \
         backend-build backend-logs backend-shell \
         dashboard-build dashboard-logs \
-        marketing-build marketing-logs \
         db-shell db-migrate \
         scan-all scan-security scan-sast scan-secrets scan-deps \
         test-api test-e2e test-performance test-accessibility \
@@ -84,7 +83,6 @@ help:
 	@echo "  DefectDojo:  http://localhost:8083"
 	@echo "  MCP SSE:     http://localhost:4000/mcp/sse"
 	@echo "  Dashboard:   http://localhost:3001"
-	@echo "  Marketing:   http://localhost:3000"
 	@echo "  PostgreSQL:  localhost:5432"
 	@echo "  Redis:       localhost:6379"
 
@@ -98,7 +96,6 @@ up:
 	@echo "Core services started:"
 	@echo "  API:         http://localhost:4000"
 	@echo "  Dashboard:   http://localhost:3001"
-	@echo "  Marketing:   http://localhost:3000"
 
 down:
 	docker compose -f docker-compose.yml -f docker-compose.extended.yml down
@@ -168,12 +165,6 @@ dashboard-build:
 
 dashboard-logs:
 	docker compose logs -f dashboard
-
-marketing-build:
-	docker compose build marketing
-
-marketing-logs:
-	docker compose logs -f marketing
 
 # ============================================
 # DATABASE
@@ -317,13 +308,9 @@ dev-backend:
 dev-dashboard:
 	cd dashboard && npm run dev
 
-dev-marketing:
-	cd marketing && npm run dev
-
 install:
 	cd backend && npm install
 	cd dashboard && npm install
-	cd marketing && npm install
 
 lint:
 	cd backend && npm run lint

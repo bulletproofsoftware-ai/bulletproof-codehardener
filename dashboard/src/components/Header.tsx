@@ -239,7 +239,7 @@ export function Header() {
 
         {/* Help */}
         <a
-          href={`${process.env.NEXT_PUBLIC_MARKETING_URL || 'http://localhost:3000'}/docs`}
+          href={process.env.NEXT_PUBLIC_DOCS_URL || 'https://github.com/bulletproofsoftware-ai/bulletproof-codehardener/tree/main/docs'}
           target="_blank"
           rel="noopener noreferrer"
           className="btn-icon text-text-tertiary hover:text-text-secondary"

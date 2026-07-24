@@ -11,7 +11,6 @@ import { test, expect } from '@playwright/test';
  * - OAuth flows
  */
 
-const MARKETING_BASE = 'http://localhost:3000';
 const DASHBOARD_BASE = 'http://localhost:3001';
 
 // Test user credentials (seeded in test environment)
@@ -28,8 +27,8 @@ const NEW_USER = {
 };
 
 test.describe('Authentication - Login', () => {
-  test('should display login page correctly @marketing @critical', async ({ page }) => {
-    await page.goto(`${MARKETING_BASE}/login`);
+  test('should display login page correctly @dashboard @critical', async ({ page }) => {
+    await page.goto(`${DASHBOARD_BASE}/login`);
 
     // Check page elements
     await expect(page.locator('h1, h2').first()).toContainText(/login|sign in/i);
@@ -44,8 +43,8 @@ test.describe('Authentication - Login', () => {
     await expect(page.locator('a[href*="signup"], a[href*="register"]')).toBeVisible();
   });
 
-  test('should show validation errors for empty form @marketing', async ({ page }) => {
-    await page.goto(`${MARKETING_BASE}/login`);
+  test('should show validation errors for empty form @dashboard', async ({ page }) => {
+    await page.goto(`${DASHBOARD_BASE}/login`);
 
     // Submit empty form
     await page.locator('button[type="submit"]').click();
@@ -54,8 +53,8 @@ test.describe('Authentication - Login', () => {
     await expect(page.locator('.error, [role="alert"], .text-red')).toBeVisible();
   });
 
-  test('should show error for invalid credentials @marketing', async ({ page }) => {
-    await page.goto(`${MARKETING_BASE}/login`);
+  test('should show error for invalid credentials @dashboard', async ({ page }) => {
+    await page.goto(`${DASHBOARD_BASE}/login`);
 
     await page.fill('input[type="email"], input[name="email"]', 'invalid@example.com');
     await page.fill('input[type="password"]', 'wrongpassword');
@@ -65,8 +64,8 @@ test.describe('Authentication - Login', () => {
     await expect(page.locator('.error, [role="alert"]')).toContainText(/invalid|incorrect|failed/i);
   });
 
-  test('should login successfully with valid credentials @marketing @critical', async ({ page }) => {
-    await page.goto(`${MARKETING_BASE}/login`);
+  test('should login successfully with valid credentials @dashboard @critical', async ({ page }) => {
+    await page.goto(`${DASHBOARD_BASE}/login`);
 
     await page.fill('input[type="email"], input[name="email"]', TEST_USER.email);
     await page.fill('input[type="password"]', TEST_USER.password);
@@ -77,7 +76,7 @@ test.describe('Authentication - Login', () => {
   });
 
   test('should handle rate limiting @security', async ({ page }) => {
-    await page.goto(`${MARKETING_BASE}/login`);
+    await page.goto(`${DASHBOARD_BASE}/login`);
 
     // Attempt multiple rapid logins
     for (let i = 0; i < 10; i++) {
@@ -100,8 +99,8 @@ test.describe('Authentication - Login', () => {
 });
 
 test.describe('Authentication - Registration', () => {
-  test('should display registration page correctly @marketing @critical', async ({ page }) => {
-    await page.goto(`${MARKETING_BASE}/signup`);
+  test('should display registration page correctly @dashboard @critical', async ({ page }) => {
+    await page.goto(`${DASHBOARD_BASE}/signup`);
 
     // Check page elements
     await expect(page.locator('h1, h2').first()).toContainText(/sign up|register|create account/i);
@@ -111,8 +110,8 @@ test.describe('Authentication - Registration', () => {
     await expect(page.locator('button[type="submit"]')).toBeVisible();
   });
 
-  test('should validate password requirements @marketing', async ({ page }) => {
-    await page.goto(`${MARKETING_BASE}/signup`);
+  test('should validate password requirements @dashboard', async ({ page }) => {
+    await page.goto(`${DASHBOARD_BASE}/signup`);
 
     await page.fill('input[name="name"], input[name="fullName"]', NEW_USER.name);
     await page.fill('input[type="email"], input[name="email"]', NEW_USER.email);
@@ -132,8 +131,8 @@ test.describe('Authentication - Registration', () => {
     expect(hasPasswordError).toBe(true);
   });
 
-  test('should prevent duplicate email registration @marketing', async ({ page }) => {
-    await page.goto(`${MARKETING_BASE}/signup`);
+  test('should prevent duplicate email registration @dashboard', async ({ page }) => {
+    await page.goto(`${DASHBOARD_BASE}/signup`);
 
     await page.fill('input[name="name"], input[name="fullName"]', 'Duplicate User');
     await page.fill('input[type="email"], input[name="email"]', TEST_USER.email); // Existing user
@@ -149,16 +148,16 @@ test.describe('Authentication - Registration', () => {
 });
 
 test.describe('Authentication - Password Reset', () => {
-  test('should display forgot password page @marketing', async ({ page }) => {
-    await page.goto(`${MARKETING_BASE}/forgot-password`);
+  test('should display forgot password page @dashboard', async ({ page }) => {
+    await page.goto(`${DASHBOARD_BASE}/forgot-password`);
 
     await expect(page.locator('h1, h2').first()).toContainText(/forgot|reset|recover/i);
     await expect(page.locator('input[type="email"], input[name="email"]')).toBeVisible();
     await expect(page.locator('button[type="submit"]')).toBeVisible();
   });
 
-  test('should accept valid email for password reset @marketing', async ({ page }) => {
-    await page.goto(`${MARKETING_BASE}/forgot-password`);
+  test('should accept valid email for password reset @dashboard', async ({ page }) => {
+    await page.goto(`${DASHBOARD_BASE}/forgot-password`);
 
     await page.fill('input[type="email"], input[name="email"]', TEST_USER.email);
     await page.locator('button[type="submit"]').click();
@@ -170,7 +169,7 @@ test.describe('Authentication - Password Reset', () => {
   });
 
   test('should not reveal if email exists @security', async ({ page }) => {
-    await page.goto(`${MARKETING_BASE}/forgot-password`);
+    await page.goto(`${DASHBOARD_BASE}/forgot-password`);
 
     // Try with non-existent email
     await page.fill('input[type="email"], input[name="email"]', 'nonexistent@example.com');
@@ -190,7 +189,7 @@ test.describe('Authentication - Password Reset', () => {
 test.describe('Authentication - Session Management', () => {
   test('should maintain session across page refreshes @dashboard', async ({ page }) => {
     // Login first
-    await page.goto(`${MARKETING_BASE}/login`);
+    await page.goto(`${DASHBOARD_BASE}/login`);
     await page.fill('input[type="email"], input[name="email"]', TEST_USER.email);
     await page.fill('input[type="password"]', TEST_USER.password);
     await page.locator('button[type="submit"]').click();
@@ -207,7 +206,7 @@ test.describe('Authentication - Session Management', () => {
 
   test('should logout successfully @dashboard @critical', async ({ page }) => {
     // Login first
-    await page.goto(`${MARKETING_BASE}/login`);
+    await page.goto(`${DASHBOARD_BASE}/login`);
     await page.fill('input[type="email"], input[name="email"]', TEST_USER.email);
     await page.fill('input[type="password"]', TEST_USER.password);
     await page.locator('button[type="submit"]').click();
@@ -219,12 +218,12 @@ test.describe('Authentication - Session Management', () => {
     await page.locator('text=logout', { exact: false }).click();
 
     // Should redirect to login or home
-    await expect(page).toHaveURL(new RegExp(`${MARKETING_BASE}|/login|/$`));
+    await expect(page).toHaveURL(new RegExp(`${DASHBOARD_BASE}|/login|/$`));
   });
 
   test('should clear session data on logout @security', async ({ page, context }) => {
     // Login
-    await page.goto(`${MARKETING_BASE}/login`);
+    await page.goto(`${DASHBOARD_BASE}/login`);
     await page.fill('input[type="email"], input[name="email"]', TEST_USER.email);
     await page.fill('input[type="password"]', TEST_USER.password);
     await page.locator('button[type="submit"]').click();
@@ -258,7 +257,7 @@ test.describe('Authentication - Session Management', () => {
 
 test.describe('Authentication - Security Headers', () => {
   test('should have secure cookie settings @security', async ({ page, context }) => {
-    await page.goto(`${MARKETING_BASE}/login`);
+    await page.goto(`${DASHBOARD_BASE}/login`);
     await page.fill('input[type="email"], input[name="email"]', TEST_USER.email);
     await page.fill('input[type="password"]', TEST_USER.password);
     await page.locator('button[type="submit"]').click();
@@ -281,7 +280,7 @@ test.describe('Authentication - Security Headers', () => {
   });
 
   test('should include security headers in response @security', async ({ page }) => {
-    const response = await page.goto(`${MARKETING_BASE}/login`);
+    const response = await page.goto(`${DASHBOARD_BASE}/login`);
     const headers = response?.headers() || {};
 
     // Check for recommended security headers
@@ -302,7 +301,7 @@ test.describe('Authentication - Security Headers', () => {
 
 test.describe('Authentication - CSRF Protection', () => {
   test('should include CSRF token in forms @security', async ({ page }) => {
-    await page.goto(`${MARKETING_BASE}/login`);
+    await page.goto(`${DASHBOARD_BASE}/login`);
 
     // Check for CSRF token in form or meta tag
     const csrfInput = await page.locator('input[name*="csrf"], input[name*="_token"]').count();

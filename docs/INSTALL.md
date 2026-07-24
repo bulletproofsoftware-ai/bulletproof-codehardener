@@ -1,8 +1,8 @@
 # Installation
 
 Code Hardener runs as a set of Docker containers orchestrated by Docker Compose.
-The backend API and MCP server are TypeScript (Node 20); the dashboard and
-marketing site are Next.js.
+The backend API and MCP server are TypeScript (Node 20); the dashboard is
+Next.js.
 
 ## Prerequisites
 

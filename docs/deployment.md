@@ -56,12 +56,9 @@ curl http://localhost:8083/api/v2/
 
 ### Optional services
 
-Marketing site and dashboard are available as Docker Compose profiles:
+The dashboard is available as a Docker Compose profile:
 
 ```bash
-# Include marketing site
-docker compose --profile marketing up -d
-
 # Include dashboard
 docker compose --profile dashboard up -d
 ```

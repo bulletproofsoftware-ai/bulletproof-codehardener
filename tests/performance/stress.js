@@ -32,7 +32,6 @@ export const options = {
 };
 
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:4000';
-const MARKETING_URL = 'http://localhost:3000';
 
 // Endpoints to stress test
 const ENDPOINTS = [
@@ -41,9 +40,6 @@ const ENDPOINTS = [
   { url: `${BASE_URL}/api/projects`, method: 'GET', name: 'projects', auth: true },
   { url: `${BASE_URL}/api/scans`, method: 'GET', name: 'scans', auth: true },
   { url: `${BASE_URL}/api/findings`, method: 'GET', name: 'findings', auth: true },
-  { url: `${MARKETING_URL}/`, method: 'GET', name: 'marketing-home' },
-  { url: `${MARKETING_URL}/features`, method: 'GET', name: 'marketing-features' },
-  { url: `${MARKETING_URL}/pricing`, method: 'GET', name: 'marketing-pricing' },
 ];
 
 const TEST_USER = {

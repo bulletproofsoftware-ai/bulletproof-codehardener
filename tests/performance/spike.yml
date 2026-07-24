@@ -45,24 +45,6 @@ scenarios:
           expect:
             - statusCode: 200
 
-  - name: "Marketing Pages"
-    weight: 3
-    flow:
-      - get:
-          url: "http://localhost:3000/"
-          expect:
-            - statusCode: 200
-      - think: 1
-      - get:
-          url: "http://localhost:3000/features"
-          expect:
-            - statusCode: 200
-      - think: 1
-      - get:
-          url: "http://localhost:3000/pricing"
-          expect:
-            - statusCode: 200
-
   - name: "Login Flow"
     weight: 2
     flow:

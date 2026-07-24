@@ -137,14 +137,14 @@ Code Hardener is a security scanning platform that processes untrusted code. Thi
               |    (nginx)       |  <- Rate limiting
               +--------+---------+
                        |
-         +-------------+-------------+
-         |             |             |
-         v             v             v
-    +---------+   +---------+   +---------+
-    |Marketing|   |Dashboard|   | Backend |
-    |  :3000  |   |  :3001  |   |  :4000  |
-    +---------+   +---------+   +----+----+
-                                     |
+              +------+------+
+              |             |
+              v             v
+         +---------+   +---------+
+         |Dashboard|   | Backend |
+         |  :3001  |   |  :4000  |
+         +---------+   +----+----+
+                            |
                     +----------------+----------------+
                     |                |                |
                     v                v                v
@@ -215,7 +215,7 @@ GRANT SELECT ON projects TO app_readonly;
 | SQL injection prevention | Parameterized queries only | Required |
 | CORS | Strict origin whitelist | Required |
 
-### 4.2 Frontend (Marketing & Dashboard)
+### 4.2 Frontend (Dashboard)
 
 | Requirement | Implementation | Status |
 |-------------|---------------|--------|
@@ -484,13 +484,6 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-
-  marketing-site:
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    read_only: true
 
   user-dashboard:
     security_opt:

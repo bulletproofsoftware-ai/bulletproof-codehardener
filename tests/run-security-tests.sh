@@ -116,26 +116,6 @@ fi
 # 5. OWASP ZAP DAST Scan (if services are running)
 echo -e "\n${YELLOW}[5/5] Running OWASP ZAP DAST scan...${NC}"
 
-# Check if marketing site is running
-if curl -s -o /dev/null -w "%{http_code}" http://localhost:3000 | grep -q "200\|301\|302"; then
-    echo -e "  Scanning marketing site..."
-    docker exec owasp-zap zap-baseline.py \
-        -t http://host.docker.internal:3000 \
-        -r /zap/reports/codehardener-marketing-$TIMESTAMP.html \
-        -J /zap/reports/codehardener-marketing-$TIMESTAMP.json 2>/dev/null || true
-
-    # Check for high/medium alerts
-    ALERTS=$(docker exec owasp-zap cat /zap/reports/codehardener-marketing-$TIMESTAMP.json 2>/dev/null | jq '[.site[].alerts[] | select(.riskcode >= 2)] | length' 2>/dev/null || echo "0")
-
-    if [ "$ALERTS" -gt 0 ]; then
-        echo -e "${RED}  ZAP found $ALERTS medium+ alerts on marketing site${NC}"
-    else
-        echo -e "${GREEN}  Marketing site DAST passed${NC}"
-    fi
-else
-    echo -e "${YELLOW}  Marketing site not running - skipping DAST${NC}"
-fi
-
 # Check if dashboard is running
 if curl -s -o /dev/null -w "%{http_code}" http://localhost:3001 | grep -q "200\|301\|302"; then
     echo -e "  Scanning dashboard..."

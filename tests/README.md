@@ -72,11 +72,6 @@ docker exec gitleaks gitleaks detect \
   --report-path /reports/codehardener-secrets.json
 
 # Dynamic Analysis (DAST) - OWASP ZAP
-# Marketing Site
-docker exec owasp-zap zap-baseline.py \
-  -t http://localhost:3000 \
-  -r /zap/reports/marketing-baseline.html
-
 # Dashboard
 docker exec owasp-zap zap-baseline.py \
   -t http://localhost:3001 \
@@ -142,11 +137,6 @@ docker exec artillery artillery run /tests/performance/spike.yml
 ### Accessibility Testing
 
 ```bash
-# Marketing site WCAG 2.1 AA
-docker exec pa11y pa11y http://localhost:3000 \
-  --standard WCAG2AA \
-  --reporter json > /reports/marketing-a11y.json
-
 # Dashboard pages
 docker exec pa11y pa11y-ci \
   --config /tests/accessibility/.pa11yci.json

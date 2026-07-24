@@ -17,7 +17,7 @@ export default defineConfig({
   ],
 
   use: {
-    baseURL: process.env.BASE_URL || 'http://localhost:3000',
+    baseURL: process.env.BASE_URL || 'http://localhost:3001',
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
@@ -47,12 +47,6 @@ export default defineConfig({
   ],
 
   webServer: [
-    {
-      command: 'echo "Using existing marketing server"',
-      url: 'http://localhost:3000',
-      reuseExistingServer: true,
-      timeout: 5000,
-    },
     {
       command: 'echo "Using existing dashboard server"',
       url: 'http://localhost:3001',

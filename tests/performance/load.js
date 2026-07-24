@@ -31,7 +31,6 @@ export const options = {
 };
 
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:4000';
-const MARKETING_URL = 'http://localhost:3000';
 const DASHBOARD_URL = 'http://localhost:3001';
 
 // Test data
@@ -65,41 +64,23 @@ export default function (data) {
   const scenario = Math.random();
 
   if (scenario < 0.3) {
-    // 30% - Browse marketing site
-    browseMarketingSite();
-  } else if (scenario < 0.5) {
-    // 20% - Login flow
+    // 30% - Login flow
     loginFlow();
-  } else if (scenario < 0.8) {
-    // 30% - Dashboard operations
+  } else if (scenario < 0.7) {
+    // 40% - Dashboard operations
     dashboardOperations(authHeaders);
   } else {
-    // 20% - API operations
+    // 30% - API operations
     apiOperations(authHeaders);
   }
 
   sleep(Math.random() * 3 + 1); // Random sleep 1-4 seconds
 }
 
-function browseMarketingSite() {
-  group('Marketing Site', function () {
-    const pages = ['/', '/features', '/pricing', '/docs', '/about'];
-
-    pages.forEach((page) => {
-      const res = http.get(`${MARKETING_URL}${page}`);
-      check(res, {
-        [`${page} returns 200`]: (r) => r.status === 200,
-        [`${page} has content`]: (r) => r.body && r.body.length > 100,
-      });
-      sleep(0.5);
-    });
-  });
-}
-
 function loginFlow() {
   group('Login Flow', function () {
     // Visit login page
-    const loginPageRes = http.get(`${MARKETING_URL}/login`);
+    const loginPageRes = http.get(`${DASHBOARD_URL}/login`);
     check(loginPageRes, {
       'login page loads': (r) => r.status === 200,
     });

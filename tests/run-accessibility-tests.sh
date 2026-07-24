@@ -21,20 +21,7 @@ mkdir -p "$REPORTS_DIR"
 echo -e "${YELLOW}Running Accessibility Tests (WCAG 2.1 AA)...${NC}"
 
 FAILURES=0
-MARKETING_ERRORS=0
 DASHBOARD_ERRORS=0
-
-# Marketing site pages to test
-MARKETING_PAGES=(
-    "http://localhost:3000"
-    "http://localhost:3000/features"
-    "http://localhost:3000/pricing"
-    "http://localhost:3000/docs"
-    "http://localhost:3000/about"
-    "http://localhost:3000/contact"
-    "http://localhost:3000/login"
-    "http://localhost:3000/signup"
-)
 
 # Dashboard pages to test (requires auth - may need adjustment)
 DASHBOARD_PAGES=(
@@ -45,36 +32,6 @@ DASHBOARD_PAGES=(
     "http://localhost:3001/attestations"
     "http://localhost:3001/settings"
 )
-
-# Test Marketing Site
-echo -e "\n${YELLOW}Testing Marketing Site...${NC}"
-
-if curl -s -o /dev/null -w "%{http_code}" http://localhost:3000 | grep -q "200\|301\|302"; then
-    for page in "${MARKETING_PAGES[@]}"; do
-        PAGE_NAME=$(echo "$page" | sed 's|http://localhost:3000||' | sed 's|/||g')
-        [ -z "$PAGE_NAME" ] && PAGE_NAME="home"
-
-        echo -e "  Testing: $PAGE_NAME"
-
-        RESULT=$(docker exec pa11y pa11y "$page" \
-            --standard WCAG2AA \
-            --reporter json 2>/dev/null || echo '{"issues":[]}')
-
-        ISSUES=$(echo "$RESULT" | jq '.issues | length' 2>/dev/null || echo "0")
-
-        if [ "$ISSUES" -gt 0 ]; then
-            echo -e "    ${RED}$ISSUES accessibility issues found${NC}"
-            MARKETING_ERRORS=$((MARKETING_ERRORS + ISSUES))
-
-            # Save detailed report
-            echo "$RESULT" > "$REPORTS_DIR/marketing-$PAGE_NAME-$TIMESTAMP.json"
-        else
-            echo -e "    ${GREEN}No issues${NC}"
-        fi
-    done
-else
-    echo -e "${YELLOW}  Marketing site not running - skipping${NC}"
-fi
 
 # Test Dashboard
 echo -e "\n${YELLOW}Testing Dashboard...${NC}"
@@ -119,16 +76,14 @@ echo -e "\n${YELLOW}Generating combined HTML report...${NC}"
     echo "<p>Standard: WCAG 2.1 AA</p>"
     echo "<h2>Summary</h2>"
     echo "<table><tr><th>Site</th><th>Issues</th><th>Status</th></tr>"
-    echo "<tr><td>Marketing Site</td><td>$MARKETING_ERRORS</td><td class='$([ $MARKETING_ERRORS -eq 0 ] && echo "pass" || echo "fail")'>$([ $MARKETING_ERRORS -eq 0 ] && echo "PASS" || echo "FAIL")</td></tr>"
     echo "<tr><td>Dashboard</td><td>$DASHBOARD_ERRORS</td><td class='$([ $DASHBOARD_ERRORS -eq 0 ] && echo "pass" || echo "fail")'>$([ $DASHBOARD_ERRORS -eq 0 ] && echo "PASS" || echo "FAIL")</td></tr>"
     echo "</table></body></html>"
 } > "$REPORTS_DIR/accessibility-report-$TIMESTAMP.html"
 
 # Summary
-TOTAL_ERRORS=$((MARKETING_ERRORS + DASHBOARD_ERRORS))
+TOTAL_ERRORS=$DASHBOARD_ERRORS
 
 echo -e "\n${YELLOW}Accessibility Test Summary:${NC}"
-echo -e "  Marketing site issues: $MARKETING_ERRORS"
 echo -e "  Dashboard issues: $DASHBOARD_ERRORS"
 echo -e "  Total issues: $TOTAL_ERRORS"
 echo -e "  Report: $REPORTS_DIR/accessibility-report-$TIMESTAMP.html"

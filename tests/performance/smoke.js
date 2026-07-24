@@ -52,13 +52,6 @@ export default function () {
 
   sleep(1);
 
-  // Marketing site home
-  const marketingRes = http.get('http://localhost:3000');
-  check(marketingRes, {
-    'marketing home returns 200': (r) => r.status === 200,
-    'marketing has content': (r) => r.body && r.body.length > 100,
-  });
-
   sleep(1);
 }
 

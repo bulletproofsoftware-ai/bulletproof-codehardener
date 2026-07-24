@@ -73,8 +73,8 @@ distribution terms.
 | stripe | ^20.3.1 | Billing |
 
 Several transitive packages are pinned to patched versions via npm `overrides`
-in `backend/package.json` (`fast-uri`, `hono`, `brace-expansion`) and in
-`dashboard/package.json` / `marketing/package.json` (`postcss`, `sharp`) to
+in `backend/package.json` (`fast-uri`, `hono`, `brace-expansion`, `esbuild`)
+and in `dashboard/package.json` (`postcss`, `sharp`) to
 remediate known advisories — see [scan/scan-report.md](scan/scan-report.md).
 
 ## Base images

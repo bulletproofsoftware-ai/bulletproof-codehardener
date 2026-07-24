@@ -13,7 +13,6 @@ import { test, expect, Page } from '@playwright/test';
  * - Settings
  */
 
-const MARKETING_BASE = 'http://localhost:3000';
 const DASHBOARD_BASE = 'http://localhost:3001';
 
 // Test user
@@ -24,7 +23,7 @@ const TEST_USER = {
 
 // Helper to login before tests
 async function loginUser(page: Page): Promise<void> {
-  await page.goto(`${MARKETING_BASE}/login`);
+  await page.goto(`${DASHBOARD_BASE}/login`);
   await page.fill('input[type="email"], input[name="email"]', TEST_USER.email);
   await page.fill('input[type="password"]', TEST_USER.password);
   await page.locator('button[type="submit"]').click();

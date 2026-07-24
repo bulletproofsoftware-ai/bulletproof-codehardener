@@ -19,7 +19,6 @@ interface LinkResult {
   type: 'internal' | 'external' | 'anchor' | 'resource';
 }
 
-const MARKETING_BASE = process.env.MARKETING_BASE || 'http://localhost:3000';
 const DASHBOARD_BASE = process.env.DASHBOARD_BASE || 'http://localhost:3001';
 const CRAWL_TIMEOUT = 30000;
 const MAX_DEPTH = 5;
@@ -260,47 +259,6 @@ class LinkCrawler {
 }
 
 test.describe('Link Crawler', () => {
-  test('Marketing site - all links should be valid @marketing @critical', async ({ page }) => {
-    test.setTimeout(300000); // 5 minutes
-
-    const crawler = new LinkCrawler(page, MARKETING_BASE);
-    const results = await crawler.crawl();
-
-    // Analyze results
-    const broken = results.filter(
-      (r) =>
-        (typeof r.status === 'number' && r.status >= 400) ||
-        r.status === 'error'
-    );
-
-    const internalBroken = broken.filter((r) => r.type === 'internal');
-    const externalBroken = broken.filter((r) => r.type === 'external');
-    const anchorBroken = broken.filter((r) => r.type === 'anchor');
-    const resourceBroken = broken.filter((r) => r.type === 'resource');
-
-    // Log summary
-    console.log('\n=== Marketing Site Link Report ===');
-    console.log(`Total pages crawled: ${results.filter(r => r.type === 'internal').length}`);
-    console.log(`External links checked: ${results.filter(r => r.type === 'external').length}`);
-    console.log(`Resources checked: ${results.filter(r => r.type === 'resource').length}`);
-    console.log(`Anchor links checked: ${results.filter(r => r.type === 'anchor').length}`);
-
-    if (broken.length > 0) {
-      console.log('\n=== Broken Links ===');
-      broken.forEach((r) => {
-        console.log(`[${r.status}] ${r.type}: ${r.url} (from: ${r.source})`);
-      });
-    }
-
-    // Assertions - ZERO broken internal links
-    expect(internalBroken, 'Broken internal links').toHaveLength(0);
-    expect(resourceBroken, 'Broken resources').toHaveLength(0);
-    expect(anchorBroken, 'Broken anchor links').toHaveLength(0);
-
-    // External links - allow some failures (third-party issues)
-    expect(externalBroken.length, 'Too many broken external links').toBeLessThan(5);
-  });
-
   test('Dashboard - all links should be valid @dashboard @critical', async ({ page }) => {
     test.setTimeout(300000);
 

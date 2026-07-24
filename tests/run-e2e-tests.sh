@@ -21,15 +21,7 @@ mkdir -p "$REPORTS_DIR"
 echo -e "${YELLOW}Running E2E Tests...${NC}"
 
 # Check if any frontend is running
-MARKETING_UP=false
 DASHBOARD_UP=false
-
-if curl -s -o /dev/null -w "%{http_code}" http://localhost:3000 | grep -q "200\|301\|302"; then
-    MARKETING_UP=true
-    echo -e "  Marketing site: ${GREEN}Running${NC}"
-else
-    echo -e "  Marketing site: ${YELLOW}Not running${NC}"
-fi
 
 if curl -s -o /dev/null -w "%{http_code}" http://localhost:3001 | grep -q "200\|301\|302"; then
     DASHBOARD_UP=true
@@ -38,7 +30,7 @@ else
     echo -e "  Dashboard: ${YELLOW}Not running${NC}"
 fi
 
-if [ "$MARKETING_UP" = false ] && [ "$DASHBOARD_UP" = false ]; then
+if [ "$DASHBOARD_UP" = false ]; then
     echo -e "${YELLOW}No frontends running - skipping E2E tests${NC}"
     exit 0
 fi
@@ -47,22 +39,6 @@ fi
 echo -e "\n${YELLOW}Running Playwright E2E tests...${NC}"
 
 FAILURES=0
-
-# Marketing site tests
-if [ "$MARKETING_UP" = true ]; then
-    echo -e "\n${YELLOW}Testing marketing site...${NC}"
-
-    if docker exec playwright npx playwright test \
-        --config=/tests/e2e/playwright.config.ts \
-        --project=chromium \
-        --grep @marketing \
-        --reporter=allure-playwright 2>/dev/null; then
-        echo -e "${GREEN}  Marketing E2E tests passed${NC}"
-    else
-        echo -e "${RED}  Marketing E2E tests failed${NC}"
-        FAILURES=$((FAILURES + 1))
-    fi
-fi
 
 # Dashboard tests
 if [ "$DASHBOARD_UP" = true ]; then

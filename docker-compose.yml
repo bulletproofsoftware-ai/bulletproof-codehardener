@@ -1,7 +1,7 @@
 # Code Hardener - Self-Contained Security Platform
 # Usage: docker compose up -d
 # Core services: postgres, redis, backend, scanner, n8n, init, dashboard
-# Optional profiles: defectdojo, marketing
+# Optional profiles: defectdojo
 
 services:
   # ============================================================
@@ -239,23 +239,6 @@ services:
       postgres:
         condition: service_healthy
     restart: "no"
-    networks:
-      - codehardener
-
-  # ============================================================
-  # Optional: Marketing site (profile: marketing)
-  # ============================================================
-  marketing:
-    build:
-      context: ./marketing
-      dockerfile: Dockerfile
-    profiles: ["marketing"]
-    environment:
-      NODE_ENV: production
-      NEXT_PUBLIC_API_URL: http://localhost:4000
-      NEXT_PUBLIC_DASHBOARD_URL: http://localhost:3001
-    ports:
-      - "3000:3000"
     networks:
       - codehardener
 

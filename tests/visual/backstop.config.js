@@ -27,74 +27,6 @@ module.exports = {
   onBeforeScript: 'puppet/onBefore.js',
   onReadyScript: 'puppet/onReady.js',
   scenarios: [
-    // Marketing Site Scenarios
-    {
-      label: 'Marketing - Home',
-      url: 'http://localhost:3000',
-      delay: 1000,
-      misMatchThreshold: 0.1,
-      requireSameDimensions: false,
-    },
-    {
-      label: 'Marketing - Home Hero',
-      url: 'http://localhost:3000',
-      selectors: ['[data-testid="hero"], .hero, header + section'],
-      delay: 500,
-    },
-    {
-      label: 'Marketing - Features',
-      url: 'http://localhost:3000/features',
-      delay: 1000,
-    },
-    {
-      label: 'Marketing - Pricing',
-      url: 'http://localhost:3000/pricing',
-      delay: 1000,
-    },
-    {
-      label: 'Marketing - Pricing Cards',
-      url: 'http://localhost:3000/pricing',
-      selectors: ['[data-testid="pricing-section"], .pricing-cards, .plans'],
-      delay: 500,
-    },
-    {
-      label: 'Marketing - Docs',
-      url: 'http://localhost:3000/docs',
-      delay: 1000,
-    },
-    {
-      label: 'Marketing - About',
-      url: 'http://localhost:3000/about',
-      delay: 1000,
-    },
-    {
-      label: 'Marketing - Contact',
-      url: 'http://localhost:3000/contact',
-      delay: 1000,
-    },
-    {
-      label: 'Marketing - Login',
-      url: 'http://localhost:3000/login',
-      delay: 500,
-    },
-    {
-      label: 'Marketing - Signup',
-      url: 'http://localhost:3000/signup',
-      delay: 500,
-    },
-    {
-      label: 'Marketing - Navigation',
-      url: 'http://localhost:3000',
-      selectors: ['nav, header'],
-      delay: 500,
-    },
-    {
-      label: 'Marketing - Footer',
-      url: 'http://localhost:3000',
-      selectors: ['footer'],
-      delay: 500,
-    },
-
     // Dashboard Scenarios
     {
       label: 'Dashboard - Overview',
@@ -135,13 +67,6 @@ module.exports = {
 
     // Interactive State Scenarios
     {
-      label: 'Marketing - Mobile Menu Open',
-      url: 'http://localhost:3000',
-      viewports: [{ label: 'phone', width: 375, height: 667 }],
-      clickSelector: '[data-testid="mobile-menu"], .hamburger, button[aria-label*="menu"]',
-      postInteractionWait: 500,
-    },
-    {
       label: 'Dashboard - Dropdown Open',
       url: 'http://localhost:3001',
       clickSelector: '[data-testid="user-menu"], .user-menu, .avatar',
@@ -151,13 +76,13 @@ module.exports = {
     // Form State Scenarios
     {
       label: 'Login - Form Focus',
-      url: 'http://localhost:3000/login',
+      url: 'http://localhost:3001/login',
       clickSelector: 'input[type="email"]',
       postInteractionWait: 300,
     },
     {
       label: 'Login - Form Error',
-      url: 'http://localhost:3000/login',
+      url: 'http://localhost:3001/login',
       onReadyScript: 'puppet/loginError.js',
       delay: 1000,
     },
