@@ -6,7 +6,7 @@ Security assurance platform for AI-first developers. Integrates 27 open-source s
 
 > **On the numbers:** 27 integrated open-source tools powering 37 analyzers (22 quality + 15 security). The tool count is the number of distinct upstream projects vendored into the scanner image; the analyzer count is the number of named checks those tools expose through the API and dashboard.
 
-> 📚 Full documentation in [`docs/`](docs/) · 🔒 security scan in [`docs/scan/scan-report.md`](docs/scan/scan-report.md) · 🎬 System overview: [briefing](media/system-overview.md).
+> 📚 Full documentation in [`docs/`](docs/) · 🔒 security scan in [`docs/scan/scan-report.md`](docs/scan/scan-report.md) · 🎬 System overview: [briefing](media/system-overview.md) · [video](media/system-overview.mp4).
 
 ## Quick Start
 
