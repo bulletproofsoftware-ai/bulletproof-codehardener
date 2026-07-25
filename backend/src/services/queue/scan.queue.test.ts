@@ -37,20 +37,23 @@ vi.mock('drizzle-orm', () => ({
   }),
 }));
 
+// Declared as real classes rather than vi.fn().mockImplementation(...):
+// vitest 4 no longer treats a plain mock function returning an object as
+// constructible, so `new Queue(...)` in scan.queue.ts threw
+// "TypeError: ... is not a constructor" under the old form.
 vi.mock('bullmq', () => {
-  return {
-    Queue: vi.fn().mockImplementation(() => ({
-      add: vi.fn().mockResolvedValue({ id: 'job-1' }),
-      getWaitingCount: vi.fn().mockResolvedValue(0),
-      getActiveCount: vi.fn().mockResolvedValue(0),
-      getCompletedCount: vi.fn().mockResolvedValue(0),
-      getFailedCount: vi.fn().mockResolvedValue(0),
-    })),
-    Worker: vi.fn().mockImplementation((_name: string, _fn: unknown, _opts: unknown) => ({
-      on: vi.fn(),
-    })),
-    Job: vi.fn(),
-  };
+  class MockQueue {
+    add = vi.fn().mockResolvedValue({ id: 'job-1' });
+    getWaitingCount = vi.fn().mockResolvedValue(0);
+    getActiveCount = vi.fn().mockResolvedValue(0);
+    getCompletedCount = vi.fn().mockResolvedValue(0);
+    getFailedCount = vi.fn().mockResolvedValue(0);
+  }
+  class MockWorker {
+    on = vi.fn();
+  }
+  class MockJob {}
+  return { Queue: MockQueue, Worker: MockWorker, Job: MockJob };
 });
 
 const mockRunScanPipeline = vi.fn();
