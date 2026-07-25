@@ -120,10 +120,18 @@ export const authenticate = async (
       const apiKey = authHeader.slice(7);
       const keyPrefix = apiKey.slice(0, 8);
 
+      // A key prefix is only the first 8 characters and is NOT unique, so
+      // this can legitimately return several rows. The previous code checked
+      // rows[0] alone, which meant a valid key was rejected whenever another
+      // key happened to share its prefix.
+      //
+      // is_active is also filtered here: it was never consulted, so a revoked
+      // key continued to authenticate for as long as it had not expired.
       const result = await db.execute(
         sql`SELECT ak.id, ak.user_id, ak.scopes, ak.key_hash, ak.expires_at
             FROM api_keys ak
             WHERE ak.key_prefix = ${keyPrefix}
+            AND ak.is_active = true
             AND (ak.expires_at IS NULL OR ak.expires_at > NOW())`
       );
 
@@ -132,14 +140,19 @@ export const authenticate = async (
         return;
       }
 
-      const keyData = result.rows[0] as unknown as ApiKeyLookupRow;
-
-      // In production, you'd verify the full key hash here
-      // For now, we just check prefix match
       const bcrypt = await import('bcryptjs');
-      const isValid = await bcrypt.compare(apiKey, keyData.key_hash);
+      let keyData: ApiKeyLookupRow | null = null;
+      for (const row of result.rows) {
+        const candidate = row as unknown as ApiKeyLookupRow;
+        // bcrypt.compare is constant-time for a given hash; every candidate
+        // sharing this prefix is checked so a collision cannot mask a match.
+        if (await bcrypt.compare(apiKey, candidate.key_hash)) {
+          keyData = candidate;
+          break;
+        }
+      }
 
-      if (!isValid) {
+      if (!keyData) {
         sendUnauthorized(res, 'Invalid API key');
         return;
       }

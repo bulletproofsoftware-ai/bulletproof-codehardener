@@ -251,7 +251,12 @@ export async function getTestStatus(req: Request, res: Response) {
   const { runId } = z.object({ runId: z.string().uuid() }).parse(req.params);
 
   const run = testRuns.get(runId);
-  if (!run) {
+  // Ownership is enforced here the same way getTestResults and cancelTestRun
+  // already do it. This handler checked only existence, so any authenticated
+  // user holding a run id could read another user's run status and output.
+  // Answer 404 rather than 403 so the endpoint does not confirm that a run
+  // id exists for someone else.
+  if (!run || run.userId !== req.user!.id) {
     throw new NotFoundError('Test run not found');
   }
 
