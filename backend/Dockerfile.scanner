@@ -438,17 +438,25 @@ RUN npm install -g @cyclonedx/cdxgen
 # ==========================================
 
 # 68. lychee - Async link checker (MIT/Apache-2.0)
-# Install via cargo on ARM64 where pre-built binaries aren't available
+# lychee tags releases as `lychee-vX.Y.Z`, not `vX.Y.Z`, and its asset filenames
+# carry no version -- so the old
+#   .../download/v0.23.0/lychee-v0.23.0-x86_64-unknown-linux-musl.tar.gz
+# 404'd on both counts and lychee was never installed. Its install block tolerates
+# that, but the tool-verification stage below runs a bare `lychee --version`, so a
+# silently missing binary failed the image build with `/bin/sh: lychee: not found`.
+# Prebuilt musl binaries exist for both arches, so the cargo fallback is no longer
+# the ARM64 path.
 RUN ARCH=$(uname -m); \
-    if [ "$ARCH" = "x86_64" ]; then \
-      wget -q https://github.com/lycheeverse/lychee/releases/download/v0.23.0/lychee-v0.23.0-x86_64-unknown-linux-musl.tar.gz \
-      && tar -xzf lychee-v0.23.0-x86_64-unknown-linux-musl.tar.gz \
+    case "$ARCH" in \
+      x86_64) LYCHEE_TARGET="x86_64-unknown-linux-musl" ;; \
+      aarch64|arm64) LYCHEE_TARGET="aarch64-unknown-linux-musl" ;; \
+      *) LYCHEE_TARGET="x86_64-unknown-linux-musl" ;; \
+    esac; \
+    TARBALL="lychee-${LYCHEE_TARGET}.tar.gz"; \
+    wget -q "https://github.com/lycheeverse/lychee/releases/download/lychee-v0.23.0/${TARBALL}" \
+      && tar -xzf "$TARBALL" \
       && mv lychee /usr/local/bin/ \
-      && rm -f lychee-v0.23.0-x86_64-unknown-linux-musl.tar.gz; \
-    else \
-      apk add --no-cache cargo rust 2>/dev/null && cargo install lychee 2>/dev/null \
-      && mv /root/.cargo/bin/lychee /usr/local/bin/ 2>/dev/null; \
-    fi; \
+      && rm -f "$TARBALL"; \
     which lychee && echo "lychee installed" \
     || echo "lychee unavailable — scanner will skip at runtime"
 
