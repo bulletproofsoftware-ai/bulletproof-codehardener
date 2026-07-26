@@ -344,15 +344,25 @@ RUN ARCH=$(uname -m); \
     && rm actionlint_1.7.12_linux_${AL_ARCH}.tar.gz
 
 # 58. Poutine - CI/CD pipeline security (Apache-2.0)
-RUN ARCH=$(uname -m); \
-    if [ "$ARCH" = "x86_64" ]; then POUTINE_ARCH="amd64"; \
-    elif [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then POUTINE_ARCH="arm64"; \
-    else POUTINE_ARCH="amd64"; fi && \
-    wget -q https://github.com/boostsecurityio/poutine/releases/download/v1.0.8/poutine_linux_${POUTINE_ARCH}.tar.gz \
-    && tar -xzf poutine_linux_${POUTINE_ARCH}.tar.gz \
-    && mv poutine /usr/local/bin/ \
-    && rm -f poutine_linux_${POUTINE_ARCH}.tar.gz \
-    && which poutine || (echo "FATAL: poutine install failed" && exit 1)
+# poutine publishes GoReleaser-style asset names -- capitalised OS and the raw
+# `uname -m` value -- so the release file is poutine_Linux_x86_64.tar.gz, not
+# poutine_linux_amd64.tar.gz. The old URL 404'd for every architecture, and
+# because `|| (echo FATAL ...)` binds only to the final `which`, wget's failure
+# aborted the chain before that diagnostic could print. Both are corrected here.
+RUN set -eu; \
+    ARCH=$(uname -m); \
+    case "$ARCH" in \
+      x86_64) POUTINE_ARCH="x86_64" ;; \
+      aarch64|arm64) POUTINE_ARCH="arm64" ;; \
+      *) POUTINE_ARCH="x86_64" ;; \
+    esac; \
+    TARBALL="poutine_Linux_${POUTINE_ARCH}.tar.gz"; \
+    wget -q "https://github.com/boostsecurityio/poutine/releases/download/v1.0.8/${TARBALL}" \
+      || { echo "FATAL: poutine download failed (${TARBALL})"; exit 1; }; \
+    tar -xzf "$TARBALL" || { echo "FATAL: poutine tarball did not extract"; exit 1; }; \
+    mv poutine /usr/local/bin/; \
+    rm -f "$TARBALL"; \
+    which poutine || { echo "FATAL: poutine install failed"; exit 1; }
 
 # 59. OpenSSF Scorecard - Supply chain security scoring (Apache-2.0)
 RUN ARCH=$(uname -m); \
