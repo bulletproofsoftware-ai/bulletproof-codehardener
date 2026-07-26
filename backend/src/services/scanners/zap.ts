@@ -1,7 +1,9 @@
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { existsSync } from 'fs';
-import { readFile, writeFile } from 'fs/promises';
+import { readFile, writeFile, mkdtemp, rm } from 'fs/promises';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import { createLogger } from '../../utils/logger.js';
 import type { ScanJobData } from '../queue/scan.queue.js';
 import type { ScannerResult, NormalizedFinding } from '../../types/index.js';
@@ -107,6 +109,8 @@ export async function runZAP(jobData: ScanJobData): Promise<ScannerResult> {
   const startTime = Date.now();
   const findings: NormalizedFinding[] = [];
   const targetUrl = jobData.targetUrl || process.env.ZAP_TARGET_URL;
+  // Declared out here so the finally block below can remove it on every path.
+  let authContextDir: string | null = null;
 
   if (!targetUrl || !targetUrl.startsWith('http')) {
     logger.info('No HTTP target URL available for ZAP DAST scan');
@@ -163,7 +167,14 @@ export async function runZAP(jobData: ScanJobData): Promise<ScannerResult> {
     let contextFileArg = '';
     if (hasAuth) {
       const contextXml = buildZapAuthContext(authConfig, targetUrl);
-      const contextPath = `/tmp/zap-auth-context-${Date.now()}.context`;
+      // This file contains the target's authentication configuration —
+      // credentials included. `/tmp/zap-auth-context-<Date.now()>.context` is
+      // guessable to the millisecond, so another local user could pre-create
+      // the path as a symlink and capture them, or read the file once written.
+      // mkdtemp gives a 0700 directory with a random suffix, created
+      // atomically (CodeQL js/insecure-temporary-file).
+      authContextDir = await mkdtemp(join(tmpdir(), 'zap-auth-'));
+      const contextPath = join(authContextDir, 'auth.context');
       await writeFile(contextPath, contextXml, 'utf-8');
       contextFileArg = `-n ${contextPath}`;
     }
@@ -324,6 +335,12 @@ export async function runZAP(jobData: ScanJobData): Promise<ScannerResult> {
       duration: Date.now() - startTime,
       error: error instanceof Error ? error.message : 'Unknown error',
     };
+  } finally {
+    // The context file holds the target's credentials, so it must not outlive
+    // the scan on either the success or the failure path.
+    if (authContextDir) {
+      await rm(authContextDir, { recursive: true, force: true }).catch(() => {});
+    }
   }
 }
 

@@ -7,7 +7,9 @@ import {
   verify as cryptoVerify,
   randomUUID,
 } from 'crypto';
-import { writeFile, readFile, unlink, mkdir } from 'fs/promises';
+import { writeFile, readFile, mkdir, mkdtemp, rm } from 'fs/promises';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import { existsSync } from 'fs';
 import { createLogger } from '../../utils/logger.js';
 import { db } from '../../db/client.js';
@@ -200,9 +202,15 @@ export async function signAttestation(
 async function signWithSigstore(
   attestation: ScanAttestation
 ): Promise<{ signature: string; certificate: string; rekorLogId: string } | null> {
-  const tempFile = `/tmp/attestation-${attestation.id}.json`;
-  const sigFile = `/tmp/attestation-${attestation.id}.sig`;
-  const certFile = `/tmp/attestation-${attestation.id}.crt`;
+  // mkdtemp creates a 0700 directory with a random suffix, atomically. The
+  // previous `/tmp/attestation-<id>.<ext>` names were predictable, and cosign
+  // is told to WRITE the signature and certificate to two of them — another
+  // local user could pre-create those paths as symlinks and capture or
+  // substitute the signing output (CodeQL js/insecure-temporary-file).
+  const workDir = await mkdtemp(join(tmpdir(), 'attestation-'));
+  const tempFile = join(workDir, 'attestation.json');
+  const sigFile = join(workDir, 'attestation.sig');
+  const certFile = join(workDir, 'attestation.crt');
 
   try {
     await writeFile(tempFile, JSON.stringify(attestation, null, 2));
@@ -235,9 +243,9 @@ async function signWithSigstore(
     );
     return null;
   } finally {
-    await unlink(tempFile).catch(() => {});
-    await unlink(sigFile).catch(() => {});
-    await unlink(certFile).catch(() => {});
+    // Remove the whole mkdtemp directory, not the three files individually —
+    // cosign may leave other output behind and the directory itself must go.
+    await rm(workDir, { recursive: true, force: true }).catch(() => {});
   }
 }
 
@@ -335,9 +343,13 @@ function verifyWithLocalKey(
 async function verifyWithSigstore(
   attestation: ScanAttestation
 ): Promise<{ valid: boolean; error?: string }> {
-  const tempFile = `/tmp/verify-${attestation.id}.json`;
-  const sigFile = `/tmp/verify-${attestation.id}.sig`;
-  const certFile = `/tmp/verify-${attestation.id}.crt`;
+  // Same reasoning as signWithSigstore, and it matters more here: these three
+  // files are the inputs to `cosign verify-blob`, so swapping them at a
+  // predictable path would decide the outcome of the verification.
+  const workDir = await mkdtemp(join(tmpdir(), 'verify-'));
+  const tempFile = join(workDir, 'attestation.json');
+  const sigFile = join(workDir, 'attestation.sig');
+  const certFile = join(workDir, 'attestation.crt');
 
   try {
     await writeFile(tempFile, JSON.stringify(attestation, null, 2));
@@ -356,9 +368,9 @@ async function verifyWithSigstore(
     logger.warn({ error, attestationId: attestation.id }, 'Sigstore attestation verification failed');
     return { valid: false, error: errorMsg };
   } finally {
-    await unlink(tempFile).catch(() => {});
-    await unlink(sigFile).catch(() => {});
-    await unlink(certFile).catch(() => {});
+    // Remove the whole mkdtemp directory, not the three files individually —
+    // cosign may leave other output behind and the directory itself must go.
+    await rm(workDir, { recursive: true, force: true }).catch(() => {});
   }
 }
 

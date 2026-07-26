@@ -1,13 +1,17 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdirSync, writeFileSync, rmSync } from 'fs';
+import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from 'fs';
+import { tmpdir } from 'os';
 import { join } from 'path';
 import { detectProjectContext } from './detect-context.js';
 
-const TEST_DIR = '/tmp/detect-context-test';
+// A fixed '/tmp/detect-context-test' is guessable and shared: any local user
+// could pre-create it, or symlink it somewhere the test then writes into
+// (CodeQL js/insecure-temporary-file). mkdtempSync creates a fresh 0700
+// directory with a random suffix, atomically, per test.
+let TEST_DIR: string;
 
 beforeEach(() => {
-  rmSync(TEST_DIR, { recursive: true, force: true });
-  mkdirSync(TEST_DIR, { recursive: true });
+  TEST_DIR = mkdtempSync(join(tmpdir(), 'detect-context-test-'));
 });
 
 afterEach(() => {
