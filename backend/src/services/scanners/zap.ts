@@ -10,6 +10,22 @@ import type { ScannerResult, NormalizedFinding } from '../../types/index.js';
 import type { Severity } from '../../types/index.js';
 
 const execAsync = promisify(exec);
+
+/**
+ * Quote a value for safe interpolation into a /bin/sh command line.
+ *
+ * These scans run through promisify(exec), which is `sh -c`. The previous code
+ * escaped only the double quote, but inside a double-quoted shell word `$(...)`
+ * and backticks are still evaluated — so a project whose configured username
+ * was `x$(id > /tmp/pwned)` executed that command on the scanner host. Wrapping
+ * in single quotes disables every form of expansion; the only character that
+ * needs handling is the single quote itself, closed and reopened around an
+ * escaped one (CodeQL js/indirect-command-line-injection).
+ */
+function shQuote(value: string): string {
+  return `'${String(value).replace(/'/g, "'\\''")}'`;
+}
+
 const logger = createLogger('scanner-zap');
 
 const ZAP_HOME = '/app/tools/ZAP_2.16.0';
@@ -143,6 +159,9 @@ export async function runZAP(jobData: ScanJobData): Promise<ScannerResult> {
     // Build ZAP form-handler auth flags when auth config is available
     let authZFlags = '';
     if (hasAuth) {
+      // Only the double quote is escaped here because these values sit inside
+      // ZAP's own -config "value" syntax; the whole -z argument is shQuote'd
+      // before it reaches the shell, so shell metacharacters cannot escape.
       const usernameField = authConfig.usernameField.replace(/"/g, '\\"');
       const passwordField = authConfig.passwordField.replace(/"/g, '\\"');
       const username = authConfig.username.replace(/"/g, '\\"');
@@ -159,9 +178,11 @@ export async function runZAP(jobData: ScanJobData): Promise<ScannerResult> {
     }
 
     // Build the -z flags string (always includes api.disablekey, plus optional auth)
-    const zFlags = authZFlags
-      ? `"-config api.disablekey=true ${authZFlags}"`
-      : '"-config api.disablekey=true"';
+    const zFlags = shQuote(
+      authZFlags
+        ? `-config api.disablekey=true ${authZFlags}`
+        : '-config api.disablekey=true'
+    );
 
     // When auth is configured, write a ZAP context XML for authenticated scanning
     let contextFileArg = '';
@@ -176,7 +197,7 @@ export async function runZAP(jobData: ScanJobData): Promise<ScannerResult> {
       authContextDir = await mkdtemp(join(tmpdir(), 'zap-auth-'));
       const contextPath = join(authContextDir, 'auth.context');
       await writeFile(contextPath, contextXml, 'utf-8');
-      contextFileArg = `-n ${contextPath}`;
+      contextFileArg = `-n ${shQuote(contextPath)}`;
     }
 
     // Use user-configured spec, auto-detected spec, or env var
@@ -189,7 +210,7 @@ export async function runZAP(jobData: ScanJobData): Promise<ScannerResult> {
       scanMode = 'api-scan';
       logger.info({ targetUrl, spec: openApiSpec, authenticated: hasAuth }, 'Running ZAP API scan');
       await execAsync(
-        `timeout 300 python3 ${apiScanScript} -t ${targetUrl} -f openapi -J ${outputFile} -z ${zFlags} ${contextFileArg} 2>/dev/null; true`,
+        `timeout 300 python3 ${shQuote(apiScanScript)} -t ${shQuote(targetUrl)} -f openapi -J ${shQuote(outputFile)} -z ${zFlags} ${contextFileArg} 2>/dev/null; true`,
         { maxBuffer: 50 * 1024 * 1024, timeout: 330000 }
       );
     } else if (hasAuth && hasFullScan) {
@@ -197,7 +218,7 @@ export async function runZAP(jobData: ScanJobData): Promise<ScannerResult> {
       scanMode = 'full-authenticated';
       logger.info({ targetUrl }, 'Running ZAP full authenticated scan');
       await execAsync(
-        `timeout 300 python3 ${fullScanScript} -t ${targetUrl} -J ${outputFile} -a -z ${zFlags} ${contextFileArg} 2>/dev/null; true`,
+        `timeout 300 python3 ${shQuote(fullScanScript)} -t ${shQuote(targetUrl)} -J ${shQuote(outputFile)} -a -z ${zFlags} ${contextFileArg} 2>/dev/null; true`,
         { maxBuffer: 50 * 1024 * 1024, timeout: 330000 }
       );
     } else if (hasBaseline) {
@@ -205,7 +226,7 @@ export async function runZAP(jobData: ScanJobData): Promise<ScannerResult> {
       scanMode = hasAuth ? 'baseline-authenticated' : 'baseline';
       logger.info({ targetUrl, authenticated: hasAuth }, 'Running ZAP baseline scan');
       await execAsync(
-        `timeout 300 python3 ${baselineScript} -t ${targetUrl} -J ${outputFile} -a -z ${zFlags} ${contextFileArg} 2>/dev/null; true`,
+        `timeout 300 python3 ${shQuote(baselineScript)} -t ${shQuote(targetUrl)} -J ${shQuote(outputFile)} -a -z ${zFlags} ${contextFileArg} 2>/dev/null; true`,
         { maxBuffer: 50 * 1024 * 1024, timeout: 330000 }
       );
     } else {
