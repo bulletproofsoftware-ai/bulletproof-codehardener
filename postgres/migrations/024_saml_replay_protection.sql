@@ -39,7 +39,20 @@ COMMENT ON TABLE saml_assertion_replay IS
     '+ clock skew, floored at 10 minutes) - they carry no security value beyond that point.';
 
 -- ============================================================
--- 2. sso_sessions: at most one PENDING row per (config, request_id)
+-- 2. sso_sessions.updated_at
+-- ============================================================
+-- sso_sessions tracks created_at and completed_at but never had an updated_at,
+-- while its sibling sso_configurations does. The session-consume path in
+-- sso-session-cache.ts (removeAsync, and the promotion to 'completed') writes
+-- updated_at, as does the dedup UPDATE below -- all of which fail against a
+-- real database without this column. The unit suite runs against an in-memory
+-- mock, so nothing caught it until the migration was applied for the first
+-- time. Additive and defaulted, so existing rows are backfilled to NOW().
+ALTER TABLE sso_sessions
+    ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW();
+
+-- ============================================================
+-- 3. sso_sessions: at most one PENDING row per (config, request_id)
 -- ============================================================
 -- A partial unique index (rather than a plain UNIQUE on request_id) is used deliberately:
 --   * it enforces exactly the invariant that matters - a request_id can be pending once;
