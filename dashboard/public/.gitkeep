@@ -1,0 +1,3 @@
+Next.js serves static files from this directory. It is kept in git (empty) because
+dashboard/Dockerfile copies it into the runner stage — `COPY --from=builder
+/app/public ./public` fails the image build outright when the path is absent.
