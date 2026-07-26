@@ -34,15 +34,55 @@ import { captureRawBody } from './middleware/webhookSignature.js';
 import { n8nHooksRoutes } from './routes/n8n-hooks.routes.js';
 import { mcpSseRouter } from './services/mcp/sse-transport.js';
 
+/**
+ * Development convenience: allow any loopback origin regardless of port, so a
+ * Vite/Next dev server on an ad-hoc port works without editing CORS_ORIGIN.
+ * Deliberately hostname-based — `http://localhost.evil.com` must not match.
+ */
+function isLoopbackOrigin(origin: string): boolean {
+  let hostname: string;
+  try {
+    ({ hostname } = new URL(origin));
+  } catch {
+    return false;
+  }
+  // URL() renders an IPv6 host bracketed; strip so '::1' compares cleanly.
+  const host = hostname.startsWith('[') && hostname.endsWith(']')
+    ? hostname.slice(1, -1)
+    : hostname;
+  return host === 'localhost' || host === '127.0.0.1' || host === '::1';
+}
+
 export function createApp() {
   const app = express();
 
   // Security middleware
   app.use(helmet());
 
-  // CORS configuration
+  // CORS configuration.
+  //
+  // This used to be `origin: isDev ? true : corsOrigins`. `origin: true` makes
+  // the cors package echo back whatever Origin the browser sent, and combined
+  // with `credentials: true` that is an allow-any-site-with-cookies policy —
+  // any page a developer visits could drive this API as them. Always match
+  // against the configured allowlist; in development additionally accept
+  // loopback origins so local dev servers still work.
   app.use(cors({
-    origin: isDev ? true : corsOrigins,
+    origin(origin, callback) {
+      // No Origin header: non-browser clients (curl, server-to-server, health
+      // probes). There is no cross-site risk to mediate, so allow.
+      if (!origin) {
+        callback(null, true);
+        return;
+      }
+      if (corsOrigins.includes(origin) || (isDev && isLoopbackOrigin(origin))) {
+        callback(null, true);
+        return;
+      }
+      // Reject by omitting the CORS headers rather than raising, so the
+      // browser blocks the read without the API returning a 500.
+      callback(null, false);
+    },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-ID', 'X-API-Key', 'X-User-Id'],

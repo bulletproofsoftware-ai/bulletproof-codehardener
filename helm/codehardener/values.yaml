@@ -140,9 +140,20 @@ n8n:
 postgresql:
   enabled: true
   auth:
-    postgresPassword: ""  # Set via secret
+    # No password defaults are shipped here on purpose. `postgresPassword: ""`
+    # and `password: ""` read as "a default exists", and they do not — an empty
+    # value is not a working credential, it is a broken deploy waiting to be
+    # discovered in CrashLoopBackOff (CodeQL js/empty-password-in-configuration-file).
+    #
+    # Supply them at install time:
+    #   --set postgresql.auth.postgresPassword=... --set postgresql.auth.password=...
+    # or from a values file kept outside the repo.
+    #
+    # Note for whoever wires this to a pre-existing secret: setting
+    # postgresql.auth.existingSecret alone is NOT sufficient. templates/secrets.yaml
+    # builds `database-url` by interpolating .Values.postgresql.auth.password
+    # directly, so it has to be taught to read the same secret at the same time.
     username: codehardener
-    password: ""  # Set via secret
     database: codehardener
   primary:
     resources:
@@ -166,7 +177,12 @@ redis:
   architecture: standalone
   auth:
     enabled: true
-    password: ""  # Set via secret
+    # As above: no empty-string default. Supply with
+    #   --set redis.auth.password=...
+    # templates/secrets.yaml interpolates this value into `redis-url` and
+    # `redis-password`, so leaving it unset yields `redis://:@host:6379` and a
+    # backend that cannot authenticate — the Bitnami subchart's own generated
+    # password is never read by this chart.
   master:
     resources:
       requests:

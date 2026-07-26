@@ -16,7 +16,6 @@ import { randomUUID } from 'crypto';
 import { promises as fs } from 'fs';
 import path from 'path';
 import os from 'os';
-import { safePath } from '../utils/safePath.js';
 
 const logger = createLogger('test-generator-controller');
 
@@ -346,14 +345,22 @@ export async function analyzeBrd(req: Request, res: Response) {
       ]);
     }
 
-    // Write to temp file and parse
-    const tempPath = safePath(os.tmpdir(), `brd-${randomUUID()}${ext}`);
+    // Write to a private temp directory and parse. mkdtemp creates a 0700
+    // directory with a random suffix in one atomic syscall, so the upload
+    // cannot land on a path another local user pre-created — and unlike the
+    // previous flat `os.tmpdir()/brd-<uuid><ext>`, no sibling process can see
+    // or read the uploaded document while it is on disk
+    // (CodeQL js/insecure-temporary-file). `ext` is already constrained to
+    // .md/.markdown/.docx/.pdf by the check above; parseBrd dispatches on it.
+    const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'brd-'));
+    const tempPath = path.join(workDir, `upload${ext}`);
     try {
-      await fs.writeFile(tempPath, file.buffer);
+      await fs.writeFile(tempPath, file.buffer, { mode: 0o600, flag: 'wx' });
       brdResult = await testGenerator.parseBrd(tempPath);
     } finally {
-      // Clean up temp file (SEC-009)
-      await fs.unlink(tempPath).catch(() => {});
+      // Clean up temp file (SEC-009) — remove the whole directory so nothing
+      // a parser dropped alongside it is left behind either.
+      await fs.rm(workDir, { recursive: true, force: true }).catch(() => {});
     }
   } else if (req.body.content) {
     // JSON with inline content

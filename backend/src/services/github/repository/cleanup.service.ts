@@ -9,7 +9,7 @@
 
 import path from 'path';
 import os from 'os';
-import { promises as fs } from 'fs';
+import { promises as fs, constants } from 'fs';
 import crypto from 'crypto';
 import { getActiveClones } from './repository.service.js';
 import { logger } from '../../../utils/logger.js';
@@ -198,30 +198,36 @@ export class CloneCleanupService {
    */
   private async secureOverwriteFile(filePath: string): Promise<void> {
     try {
-      const stats = await fs.stat(filePath);
-      const size = stats.size;
+      // Open once and take the size from the descriptor, rather than stat()ing
+      // the path and then re-opening it. The old sequence had two problems:
+      // the path could be swapped between the stat and the open (CodeQL
+      // js/file-system-race), and 'w' is O_CREAT|O_TRUNC — so a file that
+      // disappeared mid-cleanup would be *created* under CLONE_BASE_DIR, which
+      // lives in the world-writable os.tmpdir(). O_WRONLY|O_NOFOLLOW opens an
+      // already-existing regular file and nothing else.
+      const handle = await fs.open(filePath, constants.O_WRONLY | constants.O_NOFOLLOW);
 
-      // Skip very large files (> 100MB) for performance
-      if (size > 100 * 1024 * 1024) {
-        await fs.unlink(filePath);
-        return;
-      }
+      try {
+        const { size } = await handle.stat();
 
-      // Overwrite with random data
-      for (let pass = 0; pass < SECURE_DELETE_PASSES; pass++) {
-        const randomData = crypto.randomBytes(Math.min(size, 1024 * 1024));
-        const handle = await fs.open(filePath, 'w');
-
-        try {
-          let written = 0;
-          while (written < size) {
-            const toWrite = Math.min(randomData.length, size - written);
-            await handle.write(randomData, 0, toWrite);
-            written += toWrite;
+        // Skip the overwrite for very large files (> 100MB) for performance;
+        // they are still unlinked below.
+        if (size <= 100 * 1024 * 1024) {
+          for (let pass = 0; pass < SECURE_DELETE_PASSES; pass++) {
+            // Fresh random bytes per pass, as before.
+            const randomData = crypto.randomBytes(Math.min(size, 1024 * 1024));
+            let written = 0;
+            while (written < size) {
+              const toWrite = Math.min(randomData.length, size - written);
+              // Explicit position: the handle is shared across passes now, so
+              // each pass must restart at offset 0 instead of appending.
+              await handle.write(randomData, 0, toWrite, written);
+              written += toWrite;
+            }
           }
-        } finally {
-          await handle.close();
         }
+      } finally {
+        await handle.close();
       }
 
       // Delete the file

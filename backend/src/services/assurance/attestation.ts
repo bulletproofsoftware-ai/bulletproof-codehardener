@@ -2,15 +2,15 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import {
   createHash,
+  createPublicKey,
   generateKeyPairSync,
   sign as cryptoSign,
   verify as cryptoVerify,
   randomUUID,
 } from 'crypto';
-import { writeFile, readFile, mkdir, mkdtemp, rm } from 'fs/promises';
+import { writeFile, readFile, mkdir, mkdtemp, rm, link, rename } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { existsSync } from 'fs';
 import { createLogger } from '../../utils/logger.js';
 import { db } from '../../db/client.js';
 import { sql } from 'drizzle-orm';
@@ -71,14 +71,41 @@ interface ScanPredicate {
 }
 
 /**
+ * Read the signing keypair off disk. Returns null if it has not been created
+ * yet; any other error (permissions, unreadable key) is surfaced.
+ *
+ * The private key file is the single source of truth and the public half is
+ * derived from it. Two files cannot be created in one step, so reading both
+ * would let a caller arriving mid-creation see half a keypair — which is
+ * exactly the race this function exists to avoid. PUBLIC_KEY_PATH is written
+ * for operators who need to hand the key out; nothing reads it back.
+ */
+async function readSigningKeys(): Promise<{ privateKey: string; publicKey: string } | null> {
+  let privateKey: string;
+  try {
+    privateKey = await readFile(PRIVATE_KEY_PATH, 'utf-8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return null;
+    }
+    throw error;
+  }
+
+  const publicKey = createPublicKey(privateKey)
+    .export({ type: 'spki', format: 'pem' })
+    .toString();
+
+  return { privateKey, publicKey };
+}
+
+/**
  * Ensure local signing keypair exists. Generate if missing.
  * Uses Ed25519 for fast, compact signatures.
  */
 async function ensureSigningKeys(): Promise<{ privateKey: string; publicKey: string }> {
-  if (existsSync(PRIVATE_KEY_PATH) && existsSync(PUBLIC_KEY_PATH)) {
-    const privateKey = await readFile(PRIVATE_KEY_PATH, 'utf-8');
-    const publicKey = await readFile(PUBLIC_KEY_PATH, 'utf-8');
-    return { privateKey, publicKey };
+  const existing = await readSigningKeys();
+  if (existing) {
+    return existing;
   }
 
   // Create keys directory
@@ -89,8 +116,44 @@ async function ensureSigningKeys(): Promise<{ privateKey: string; publicKey: str
     publicKeyEncoding: { type: 'spki', format: 'pem' },
   });
 
-  await writeFile(PRIVATE_KEY_PATH, privateKey, { mode: 0o600 });
-  await writeFile(PUBLIC_KEY_PATH, publicKey, { mode: 0o644 });
+  // Publish the keypair through a staging directory rather than writing
+  // straight to PRIVATE_KEY_PATH. The old existsSync()-then-writeFile sequence
+  // left a window in which the path could be replaced by a symlink and the
+  // Ed25519 *private* key written through it, and in which two workers
+  // starting together would each write a different keypair over the other.
+  //
+  // link() is the commit: it is atomic, it fails with EEXIST instead of
+  // clobbering, it will not follow a symlink at the destination, and it only
+  // ever exposes a file whose contents are already complete.
+  const stagingDir = await mkdtemp(join(KEYS_DIR, '.staging-'));
+  try {
+    const stagedPrivate = join(stagingDir, 'private.pem');
+    const stagedPublic = join(stagingDir, 'public.pem');
+    await writeFile(stagedPrivate, privateKey, { mode: 0o600 });
+    await writeFile(stagedPublic, publicKey, { mode: 0o644 });
+
+    try {
+      await link(stagedPrivate, PRIVATE_KEY_PATH);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
+        throw error;
+      }
+      // Another worker committed first. Use its key and discard ours, so every
+      // worker in the process group signs with the same key.
+      const winner = await readSigningKeys();
+      if (!winner) {
+        throw error;
+      }
+      return winner;
+    }
+
+    // We own the keypair now, so the public half is ours to publish. rename()
+    // replaces any stale .pub left behind by an interrupted earlier run, and
+    // replaces a symlink rather than writing through it.
+    await rename(stagedPublic, PUBLIC_KEY_PATH);
+  } finally {
+    await rm(stagingDir, { recursive: true, force: true }).catch(() => {});
+  }
 
   logger.info({ keysDir: KEYS_DIR }, 'Generated new Ed25519 signing keypair for attestations');
 

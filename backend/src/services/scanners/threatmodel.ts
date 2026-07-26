@@ -1,4 +1,4 @@
-import { readFile, readdir, stat } from 'fs/promises';
+import { open, readdir } from 'fs/promises';
 import { join, extname } from 'path';
 import { createLogger } from '../../utils/logger.js';
 import type { ScanJobData } from '../queue/scan.queue.js';
@@ -456,14 +456,29 @@ export async function runThreatModel(_jobData: ScanJobData): Promise<ScannerResu
 
     for (const filePath of sourceFiles) {
       try {
+        // Open once and size the file through the descriptor. stat()ing the
+        // path and then readFile()ing it resolves the path twice, so the bytes
+        // read are not guaranteed to be the bytes that were size-checked —
+        // the MAX_FILE_SIZE guard could be walked straight past
+        // (CodeQL js/file-system-race).
+        const handle = await open(filePath, 'r');
+        let content: string | null = null;
+
+        try {
+          const { size } = await handle.stat();
+          if (size <= MAX_FILE_SIZE) {
+            content = await handle.readFile('utf-8');
+          }
+        } finally {
+          await handle.close();
+        }
+
         // Skip oversized files
-        const fileStat = await stat(filePath);
-        if (fileStat.size > MAX_FILE_SIZE) {
+        if (content === null) {
           filesSkipped++;
           continue;
         }
 
-        const content = await readFile(filePath, 'utf-8');
         filesAnalyzed++;
 
         const matches = analyzeFileContent(content, filePath, THREAT_RULES);
