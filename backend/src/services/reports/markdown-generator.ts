@@ -28,6 +28,20 @@ export function escapeMarkdownField(s: string | null | undefined): string {
 }
 
 /**
+ * Flatten a scanner-supplied string into something safe to truncate and drop
+ * into a single table cell: collapse every whitespace run (including newlines,
+ * which would otherwise terminate the table row) to one space, then truncate.
+ *
+ * Truncation happens on the RAW text and must run BEFORE escapeMarkdownField,
+ * never after: slicing escaped text can cut an escape sequence in half and
+ * leave a dangling backslash that re-exposes the very character it was hiding.
+ */
+export function collapseToCell(s: string | null | undefined, maxLength: number): string {
+  if (s == null) return '';
+  return String(s).replace(/\s+/g, ' ').trim().slice(0, maxLength);
+}
+
+/**
  * Break any embedded ``` fence sequences so attacker content inside a fenced
  * block cannot close the fence early and inject live markdown (spec §11 B1/R4).
  */
@@ -160,9 +174,9 @@ export async function generateMarkdownReport(options: MarkdownReportOptions): Pr
       const status = s.skipped ? 'skipped' : s.success ? 'pass' : 'fail';
       let notes = '';
       if (s.skipped && s.skipReason) {
-        notes = `_skipped: ${s.skipReason}_`;
+        notes = `_skipped: ${escapeMarkdownField(collapseToCell(s.skipReason, 80))}_`;
       } else if (!s.success && !s.skipped && s.error) {
-        notes = `_error: ${s.error.replace(/\|/g, '\\|').slice(0, 80)}_`;
+        notes = `_error: ${escapeMarkdownField(collapseToCell(s.error, 80))}_`;
       }
       lines.push(`| ${s.scanner} | ${status} | ${s.findings} | ${(s.duration / 1000).toFixed(1)}s | ${notes} |`);
     }
