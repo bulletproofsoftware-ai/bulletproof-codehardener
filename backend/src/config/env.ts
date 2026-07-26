@@ -116,6 +116,24 @@ const envSchema = z.object({
   // 30s request timeout (inherited from llm-verifier) and aborts. 120s lets the
   // document generation complete.
   LLM_THREATMODEL_REQUEST_TIMEOUT_MS: z.coerce.number().default(120000),
+
+  // SAML SSO
+  // Kill-switch for the entire SSO surface. Defaults to OFF: an operator who has
+  // never configured SSO ends up with zero SAML attack surface rather than a
+  // dormant-but-reachable ACS endpoint. Deployments already using SAML SSO must
+  // set SSO_ENABLED=true.
+  // z.coerce.boolean() treats ANY non-empty string (including "false") as true,
+  // which would make the off-switch unusable - see LLM_SCAN_CONFIDENCE_PASS above.
+  SSO_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
+  // Clock skew tolerated when checking SAML Conditions / SubjectConfirmationData
+  // time windows. -1 disables ALL timestamp checks in node-saml (saml.js:905),
+  // which silently reinstates the vulnerability this setting exists to bound.
+  // Reject out-of-range values at boot rather than clamping them, so a
+  // misconfiguration fails loudly instead of silently.
+  SAML_CLOCK_SKEW_MS: z.coerce.number().int().min(0).max(300_000).default(60_000),
 });
 
 const parsed = envSchema.safeParse(process.env);
@@ -161,6 +179,9 @@ if (isProd) {
   }
 }
 export const isTest = env.NODE_ENV === 'test';
+
+export const ssoEnabled = env.SSO_ENABLED;
+export const samlClockSkewMs = env.SAML_CLOCK_SKEW_MS;
 
 export const stripeEnabled = !!env.STRIPE_SECRET_KEY;
 export const llmVerifyEnabled = !!env.ANTHROPIC_API_KEY;

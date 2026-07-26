@@ -15,10 +15,29 @@ import {
 } from '../services/sso/saml.service.js';
 import { db } from '../db/client.js';
 import { sql } from 'drizzle-orm';
-import { corsOrigins } from '../config/env.js';
+import { corsOrigins, ssoEnabled } from '../config/env.js';
+import { AppError, NotFoundError } from '../middleware/errorHandler.js';
 
 const logger = createLogger('sso-routes');
 const router = Router();
+
+/**
+ * Kill-switch, router layer (§B.13 layer 2).
+ *
+ * `app.ts` already refuses to mount this router when SSO_ENABLED is false, so
+ * this is defence in depth: the surface stays closed even if the mount is ever
+ * made unconditional again. A 404 is returned rather than a 403 so a disabled
+ * deployment is indistinguishable from one that never had these routes.
+ */
+function requireSsoEnabled(_req: Request, _res: Response, next: NextFunction): void {
+  if (!ssoEnabled) {
+    next(new NotFoundError());
+    return;
+  }
+  next();
+}
+
+router.use(requireSsoEnabled);
 
 // Validation schemas
 const ssoConfigSchema = z.object({
@@ -212,7 +231,13 @@ router.post('/saml/acs/:configId', async (req: Request, res: Response, next: Nex
     // Otherwise return JSON
     sendSuccess(res, { user, tokens, isNewUser });
   } catch (error) {
-    logger.error({ error }, 'SAML ACS error');
+    // The service has already logged the structured rejection reason. The route
+    // must add nothing attacker-derived: serialising the error here would put
+    // library messages carrying attacker values into the log.
+    logger.warn(
+      { statusCode: error instanceof AppError ? error.statusCode : 500 },
+      'SAML ACS rejected'
+    );
     next(error);
   }
 });

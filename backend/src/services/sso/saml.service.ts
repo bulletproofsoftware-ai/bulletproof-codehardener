@@ -12,7 +12,30 @@ import { db } from '../../db/client.js';
 import { sql } from 'drizzle-orm';
 import { createLogger } from '../../utils/logger.js';
 import { generateTokens, type AuthTokens, type UserData } from '../auth.service.js';
-import { NotFoundError, UnauthorizedError } from '../../middleware/errorHandler.js';
+import { NotFoundError } from '../../middleware/errorHandler.js';
+import { ssoEnabled } from '../../config/env.js';
+import {
+  SsoSessionCacheProvider,
+  promoteSessionToCompleted,
+} from './sso-session-cache.js';
+import {
+  assertionReplayExpiry,
+  checkDestination,
+  checkIssuer,
+  checkRecipient,
+  checkSubjectInResponseTo,
+  correlationOf,
+  createSamlValidator,
+  decodeAndScreenResponse,
+  envelopeInResponseTo,
+  parseResponseDom,
+  pinAlgorithms,
+  readVerifiedAssertion,
+  rejectSaml,
+  validateSignedResponse,
+  type SamlLogContext,
+} from './saml-validator.js';
+import { claimAssertionId, maybeCleanupExpiredAssertionIds } from './assertion-replay.js';
 
 const logger = createLogger('saml-service');
 
@@ -48,6 +71,8 @@ interface UserRow {
   email: string;
   name: string;
   created_at: Date;
+  sso_provider: string | null;
+  sso_subject_id: string | null;
 }
 
 export interface SSOConfig {
@@ -228,14 +253,28 @@ export async function initiateSAMLLogin(
   ipAddress?: string,
   userAgent?: string
 ): Promise<{ redirectUrl: string; requestId: string }> {
+  // Kill-switch, service layer (§B.13 layer 3). This is the durable one: it
+  // holds for direct service calls, future routes, queue workers and tests,
+  // independent of how the router happens to be mounted.
+  if (!ssoEnabled) {
+    rejectSaml('sso_disabled', {
+      ssoConfigId: ssoConfig.id,
+      teamId: ssoConfig.teamId,
+      correlation: 'none',
+    });
+  }
+
   const requestId = `_${crypto.randomUUID()}`;
 
-  // Create session to track this auth flow
-  await db.execute(
-    sql`INSERT INTO sso_sessions (sso_config_id, request_id, relay_state, ip_address, user_agent)
-        VALUES (${ssoConfig.id}, ${requestId}, ${relayState || null},
-                ${ipAddress || null}::inet, ${userAgent || null})`
-  );
+  // Create session to track this auth flow. Routed through the cache provider
+  // so one implementation owns the table and node-saml's `getAsync` observes
+  // exactly the rows this writes.
+  const provider = new SsoSessionCacheProvider(ssoConfig.id, {
+    relayState,
+    ipAddress,
+    userAgent,
+  });
+  await provider.saveAsync(requestId, new Date().toISOString());
 
   // Build AuthnRequest XML
   const issueInstant = new Date().toISOString();
@@ -280,39 +319,141 @@ export async function initiateSAMLLogin(
 
 /**
  * Process a SAML Response (assertion) from the IdP.
- * Validates the assertion, finds or creates the user, and returns JWT tokens.
+ *
+ * Every assertion reaching this function has its signature verified against the
+ * pinned `idp_certificate` before any field of it is believed. There is no
+ * branch anywhere that asks whether a signature is present: an unsigned
+ * assertion, or one signed by any other key, is rejected by
+ * `validateSignedResponse`.
+ *
+ * The order of the steps below is load-bearing and must not be rearranged —
+ * in particular the session consume produces the `consumedRequestId` that the
+ * request-binding check compares against, so it has to precede it.
  */
 export async function processSAMLResponse(
   samlResponse: string,
   ssoConfigId: string
 ): Promise<{ user: UserData; tokens: AuthTokens; isNewUser: boolean }> {
+  const ctx: SamlLogContext = { ssoConfigId, teamId: null, correlation: 'none' };
+
+  if (!ssoEnabled) rejectSaml('sso_disabled', ctx);
+
   const config = await getSSOConfigById(ssoConfigId);
-  if (!config || !config.enabled) {
-    throw new UnauthorizedError('SSO not configured or disabled');
+  if (!config) rejectSaml('config_missing', ctx);
+  ctx.teamId = config.teamId;
+  if (!config.enabled) rejectSaml('config_disabled', ctx);
+
+  // Size cap, decode, DTD rejection — before node-saml or any DOM parser sees
+  // the body. Bounds XML-parser CPU and memory on unauthenticated input.
+  const responseXml = decodeAndScreenResponse(samlResponse, ctx);
+
+  const { saml, provider } = createSamlValidator(config, ctx);
+
+  // Step 1 — signature verification. Everything after this point reads only
+  // bytes that the pinned IdP certificate actually covered.
+  const profile = await validateSignedResponse(saml, samlResponse, ctx);
+
+  // One parse of the raw response serves the advisory Destination check and
+  // both algorithm pins.
+  const doc = parseResponseDom(responseXml, ctx);
+
+  // Step 2 — algorithm pinning, after validation and before any identity
+  // decision. Covers the assertion signature AND the envelope signature when
+  // one is present.
+  pinAlgorithms(doc, ctx);
+
+  // Step 3 — structural reads and the checks the library does not perform.
+  const assertion = readVerifiedAssertion(profile, ctx);
+  ctx.correlation = correlationOf(assertion.subjectInResponseTo[0] ?? null);
+  checkIssuer(assertion, config, ctx);
+  checkRecipient(assertion, config, ctx);
+  checkDestination(doc, config, ctx);
+
+  // Step 4 — consume the pending session, atomically and exactly once.
+  // node-saml may or may not have already called `removeAsync`, depending on
+  // the assertion's SubjectConfirmationData shape (`saml.js:797-830`) and on
+  // whether it took the terminal catch (`saml.js:625-631`). Consume
+  // unconditionally; the UPDATE is idempotent-safe because a second execution
+  // matches zero rows.
+  if (provider.consumedSessionId === null) {
+    await provider.removeAsync(envelopeInResponseTo(doc, ctx));
   }
+  const sessionId = provider.consumedSessionId;
+  const consumedRequestId = provider.consumedRequestId;
+  // Replay, expired, or wrong tenant.
+  if (sessionId === null || consumedRequestId === null) rejectSaml('session_not_consumed', ctx);
 
-  // Decode the SAML response
-  const responseXml = Buffer.from(samlResponse, 'base64').toString('utf-8');
+  // Step 5 — bind the assertion to the request we actually consumed.
+  checkSubjectInResponseTo(assertion, consumedRequestId, ctx);
 
-  // Parse the assertion (simplified — production should use xml-crypto for signature validation)
-  const assertion = parseSAMLAssertion(responseXml, config);
-
-  // Verify the InResponseTo matches a pending session
-  const sessionResult = await db.execute(
-    sql`SELECT id FROM sso_sessions
-        WHERE request_id = ${assertion.inResponseTo}
-        AND sso_config_id = ${config.id}
-        AND status = 'pending'
-        AND created_at > NOW() - INTERVAL '10 minutes'`
+  // Step 6 — assertion-ID single use. Independent of the session gate, so a
+  // replayed assertion carrying a fresh InResponseTo is still blocked.
+  const claimed = await claimAssertionId(
+    config.id,
+    assertion.id,
+    assertionReplayExpiry(assertion)
   );
+  if (!claimed) rejectSaml('assertion_replayed', ctx);
 
-  if (sessionResult.rows.length === 0) {
-    throw new UnauthorizedError('Invalid or expired SAML session');
-  }
+  // Step 7 — resolve the identity, scoped to this configuration's team.
+  const identity = toSAMLAssertion(assertion, consumedRequestId);
+  const { user, isNewUser } = await resolveSSOUser(identity, config, ctx);
 
-  const sessionId = (sessionResult.rows[0] as unknown as IdRow).id;
+  // Step 8 — promote the session. The last DB write, reached only on full
+  // success, so 'completed' keeps meaning "a user actually logged in".
+  await promoteSessionToCompleted(sessionId, user.id);
 
-  // Extract email from assertion
+  const tokens = generateTokens(user.id, user.email);
+
+  logger.info({ userId: user.id, teamId: config.teamId, isNewUser }, 'SAML authentication successful');
+
+  void maybeCleanupExpiredAssertionIds();
+
+  return { user, tokens, isNewUser };
+}
+
+/**
+ * Project the structurally-read assertion onto the long-standing
+ * `SAMLAssertion` shape, which the identity resolution below consumes.
+ */
+function toSAMLAssertion(
+  assertion: ReturnType<typeof readVerifiedAssertion>,
+  consumedRequestId: string
+): SAMLAssertion {
+  return {
+    nameId: assertion.nameId,
+    nameIdFormat: assertion.nameIdFormat,
+    sessionIndex: assertion.sessionIndex,
+    attributes: assertion.attributes,
+    issuer: assertion.issuer,
+    inResponseTo: consumedRequestId,
+    notBefore: assertion.conditionsNotBefore ?? undefined,
+    notOnOrAfter: assertion.conditionsNotOnOrAfter ?? undefined,
+  };
+}
+
+/**
+ * Resolve the assertion's subject to a local user, scoped to the team that owns
+ * this SSO configuration.
+ *
+ * Signature verification alone does NOT close the account-takeover hole; it
+ * only changes who can exploit it. `sso_configurations.idp_certificate` is
+ * writable by any team admin while the `users` identity namespace is global, so
+ * without the team scope below an attacker who configures their own team's IdP
+ * can self-sign an assertion naming any address on the platform and every
+ * cryptographic check passes — because they control every value being checked.
+ *
+ * This is the minimal closure. It does NOT close the case where an attacker
+ * admin first induces the victim into their team; a verified per-configuration
+ * email-domain allowlist is the control that would, and it is a deliberately
+ * deferred follow-on. Keep SSO_ENABLED=false for any deployment with untrusted
+ * team admins.
+ */
+async function resolveSSOUser(
+  assertion: SAMLAssertion,
+  config: SSOConfig,
+  ctx: SamlLogContext
+): Promise<{ user: UserData; isNewUser: boolean }> {
   const emailAttr = config.attributeMapping.email || 'email';
   const nameAttr = config.attributeMapping.name || 'name';
 
@@ -328,138 +469,78 @@ export async function processSAMLResponse(
     name = Array.isArray(nameVal) ? nameVal[0] : nameVal;
   }
 
-  if (!email) {
-    throw new UnauthorizedError('SAML assertion missing email');
-  }
+  if (!email) rejectSaml('email_missing', ctx);
+  const emailLower = email.toLowerCase();
 
-  // Find or create user
-  let isNewUser = false;
-  let userResult = await db.execute(
-    sql`SELECT id, email, name, created_at FROM users WHERE email = ${email.toLowerCase()}`
+  const userResult = await db.execute(
+    sql`SELECT u.id, u.email, u.name, u.created_at, u.sso_provider, u.sso_subject_id
+        FROM users u
+        WHERE u.email = ${emailLower}
+          AND EXISTS (SELECT 1 FROM team_members tm
+                      WHERE tm.team_id = ${config.teamId} AND tm.user_id = u.id)`
   );
 
-  let userId: string;
+  if (userResult.rows.length > 0) {
+    const row = userResult.rows[0] as unknown as UserRow;
 
-  if (userResult.rows.length === 0) {
-    if (!config.autoProvisionUsers) {
-      throw new UnauthorizedError('User not found and auto-provisioning is disabled');
-    }
+    // Linking a local-password account to a team IdP is an explicit,
+    // authenticated, user-consented action — not something an unauthenticated
+    // POST performs. The previous code silently adopted any matching account
+    // ("UPDATE users SET sso_provider = 'saml' ... WHERE sso_provider IS NULL"),
+    // which handed the account to whoever controlled the assertion.
+    if (row.sso_provider !== 'saml') rejectSaml('user_not_sso_linked', ctx);
+    if (row.sso_subject_id !== assertion.nameId) rejectSaml('user_not_sso_linked', ctx);
 
-    // Create new user via SSO
-    const createResult = await db.execute(
-      sql`INSERT INTO users (email, name, email_verified, sso_provider, sso_subject_id)
-          VALUES (${email.toLowerCase()}, ${name}, true, 'saml', ${assertion.nameId})
-          RETURNING id, email, name, created_at`
-    );
-    userResult = createResult;
-    isNewUser = true;
-    userId = (createResult.rows[0] as unknown as UserRow).id;
+    return {
+      user: {
+        id: row.id,
+        email: row.email,
+        name: row.name,
+        createdAt: row.created_at,
+      },
+      isNewUser: false,
+    };
+  }
 
-    // Auto-add to team
-    if (config.autoAddToTeam) {
-      await db.execute(
-        sql`INSERT INTO team_members (team_id, user_id, role)
-            VALUES (${config.teamId}, ${userId}, ${config.defaultRole})
-            ON CONFLICT DO NOTHING`
-      );
-    }
+  // No user in this team. Before provisioning, make sure the address does not
+  // already belong to someone OUTSIDE it — otherwise the "user not found" path
+  // would create a duplicate account for a victim's address, or collide on the
+  // unique email index.
+  const foreignUser = await db.execute(
+    sql`SELECT id FROM users WHERE email = ${emailLower}`
+  );
+  if (foreignUser.rows.length > 0) rejectSaml('user_not_in_team', ctx);
 
-    logger.info({ userId, email, teamId: config.teamId }, 'SSO user auto-provisioned');
-  } else {
-    userId = (userResult.rows[0] as unknown as UserRow).id;
+  if (!config.autoProvisionUsers) rejectSaml('user_not_provisionable', ctx);
 
-    // Update SSO linkage if not already set
+  const createResult = await db.execute(
+    sql`INSERT INTO users (email, name, email_verified, sso_provider, sso_subject_id)
+        VALUES (${emailLower}, ${name}, true, 'saml', ${assertion.nameId})
+        RETURNING id, email, name, created_at`
+  );
+  const created = createResult.rows[0] as unknown as UserRow;
+
+  if (config.autoAddToTeam) {
     await db.execute(
-      sql`UPDATE users SET sso_provider = 'saml', sso_subject_id = ${assertion.nameId},
-              updated_at = NOW()
-          WHERE id = ${userId} AND sso_provider IS NULL`
+      sql`INSERT INTO team_members (team_id, user_id, role)
+          VALUES (${config.teamId}, ${created.id}, ${config.defaultRole})
+          ON CONFLICT DO NOTHING`
     );
   }
 
-  // Mark session completed
-  await db.execute(
-    sql`UPDATE sso_sessions SET status = 'completed', user_id = ${userId},
-            completed_at = NOW()
-        WHERE id = ${sessionId}`
+  logger.info(
+    { userId: created.id, teamId: config.teamId },
+    'SSO user auto-provisioned'
   );
-
-  const userRow = userResult.rows[0] as unknown as UserRow;
-  const user: UserData = {
-    id: userRow.id,
-    email: userRow.email,
-    name: userRow.name,
-    createdAt: userRow.created_at,
-  };
-
-  const tokens = generateTokens(user.id, user.email);
-
-  logger.info({ userId: user.id, teamId: config.teamId, isNewUser }, 'SAML authentication successful');
-
-  return { user, tokens, isNewUser };
-}
-
-/**
- * Parse a SAML assertion from response XML.
- * NOTE: In production, use xml-crypto to verify the XML signature against
- * the IdP certificate. This implementation extracts fields without
- * cryptographic verification for the initial implementation.
- */
-function parseSAMLAssertion(responseXml: string, config: SSOConfig): SAMLAssertion {
-  // Extract key fields using regex (production: use xml2js + xml-crypto)
-  function escapeRegExp(str: string): string {
-    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  }
-
-  const getElement = (tag: string): string => {
-    const safeTag = escapeRegExp(tag);
-    const match = responseXml.match(new RegExp(`<[^>]*:?${safeTag}[^>]*>([^<]+)<`));
-    return match ? match[1].trim() : '';
-  };
-
-  const getAttr = (tag: string, attr: string): string => {
-    const safeTag = escapeRegExp(tag);
-    const safeAttr = escapeRegExp(attr);
-    const match = responseXml.match(new RegExp(`<[^>]*:?${safeTag}[^>]*${safeAttr}="([^"]+)"`));
-    return match ? match[1] : '';
-  };
-
-  const nameId = getElement('NameID');
-  const issuer = getElement('Issuer');
-  const inResponseTo = getAttr('Response', 'InResponseTo') || getAttr('Assertion', 'InResponseTo');
-
-  // Verify issuer matches IdP
-  if (issuer && issuer !== config.idpEntityId) {
-    throw new UnauthorizedError(`SAML assertion issuer mismatch: expected ${config.idpEntityId}, got ${issuer}`);
-  }
-
-  // Extract attributes.
-  //
-  // responseXml is base64-decoded from an unauthenticated POST to the ACS
-  // endpoint, so this regex runs on hostile input. The previous pattern used
-  // `<[^>]*:?Attribute` and `[\s\S]*?<[^>]*:?AttributeValue`: `[^>]*` and
-  // `[\s\S]*?` can both consume '<', so every '<' in the document was a match
-  // start that backtracked across the rest of the document — quadratic time on
-  // a body of repeated '<'. Every quantifier below is bounded and its character
-  // class excludes the delimiter that follows it, so no position can be matched
-  // two different ways and the scan stays linear. The optional namespace prefix
-  // ("saml:", "saml2:", "ns2:") is matched explicitly instead of by a wildcard.
-  const attributes = new Map<string, string | string[]>();
-  const attrRegex =
-    /<(?:[A-Za-z0-9_.-]{1,64}:)?Attribute\s+Name="([^"<>]{1,256})"[^<>]{0,1024}>[^<]{0,4096}<(?:[A-Za-z0-9_.-]{1,64}:)?AttributeValue[^<>]{0,1024}>([^<]{1,4096})</g;
-  let attrMatch;
-  while ((attrMatch = attrRegex.exec(responseXml)) !== null) {
-    attributes.set(attrMatch[1], attrMatch[2].trim());
-  }
 
   return {
-    nameId,
-    nameIdFormat: getAttr('NameID', 'Format'),
-    sessionIndex: getAttr('AuthnStatement', 'SessionIndex'),
-    attributes,
-    issuer,
-    inResponseTo,
-    notBefore: getAttr('Conditions', 'NotBefore'),
-    notOnOrAfter: getAttr('Conditions', 'NotOnOrAfter'),
+    user: {
+      id: created.id,
+      email: created.email,
+      name: created.name,
+      createdAt: created.created_at,
+    },
+    isNewUser: true,
   };
 }
 
@@ -494,6 +575,8 @@ export async function deleteSSOConfig(teamId: string): Promise<void> {
   );
   logger.info({ teamId }, 'SSO configuration deleted');
 }
+
+export { cleanupExpiredAssertionIds } from './assertion-replay.js';
 
 /**
  * Clean up expired SSO sessions

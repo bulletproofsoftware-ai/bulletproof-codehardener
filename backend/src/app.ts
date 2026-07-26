@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
-import { corsOrigins, isDev } from './config/env.js';
+import { corsOrigins, isDev, ssoEnabled } from './config/env.js';
 import { requestLogger, rateLimiter, errorHandler, notFoundHandler } from './middleware/index.js';
 import { attachRLS } from './middleware/auth.js';
 import { healthRoutes } from './routes/health.routes.js';
@@ -129,7 +129,13 @@ export function createApp() {
   app.use('/api/v1/prompts', promptRoutes);
   app.use('/api/v1/test-generator', testGeneratorRoutes);
   app.use('/api/v1/github', githubRoutes);
-  app.use('/api/v1/sso', ssoRoutes);
+  // Kill-switch, mount layer (§B.13 layer 1). With the router unmounted,
+  // /api/v1/sso/* falls through to notFoundHandler — a plain 404, giving no
+  // fingerprint that an SSO surface exists. SSO_ENABLED defaults to false, so a
+  // deployment that never configured SAML carries zero SAML attack surface.
+  if (ssoEnabled) {
+    app.use('/api/v1/sso', ssoRoutes);
+  }
   app.use('/api/v1/gdpr', gdprRoutes);
   app.use('/api/v1/suppressions', suppressionRoutes);
   app.use('/api/v1/registry-credentials', registryCredentialRoutes);

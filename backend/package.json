@@ -21,6 +21,8 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.26.0",
+    "@node-saml/node-saml": "^5.1.0",
+    "@xmldom/xmldom": "^0.8.13",
     "argon2": "^0.44.0",
     "bcryptjs": "^2.4.3",
     "body-parser": "^2.3.0",
@@ -67,9 +69,12 @@
     "eslint": "^10.8.0",
     "tsx": "^4.19.0",
     "typescript": "^5.5.4",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.10",
+    "xml-crypto": "^6.1.2"
   },
   "overrides": {
+    "@xmldom/xmldom": "^0.8.13",
+    "xml-crypto": "^6.1.2",
     "lodash": "^4.17.23",
     "fast-uri": "^3.1.4",
     "hono": "^4.12.25",
