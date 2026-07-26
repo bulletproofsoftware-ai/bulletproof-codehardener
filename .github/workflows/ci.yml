@@ -132,9 +132,13 @@ jobs:
             -f backend/Dockerfile.scanner \
             ./backend
 
-      - name: Report disk usage and image size
+      # Deliberately only `df` and `free`, which return instantly. Do not add
+      # `docker system df` here: it walks every record in the BuildKit cache,
+      # and after the scanner build that cache is large enough that the command
+      # hung for three and a half minutes and took the runner down with it
+      # (exit 143) even though the build itself had already succeeded.
+      - name: Report runner resource usage
         if: always()
         run: |
           df -h /
           free -h || true
-          docker system df || true
