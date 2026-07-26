@@ -17,6 +17,29 @@ import { applySuppressions } from '../controllers/suppressions.controller.js';
 const logger = createLogger('n8n-hooks');
 const router = Router();
 
+type SeverityKey = 'critical' | 'high' | 'medium' | 'low' | 'info';
+
+/**
+ * Map an untrusted severity string from a request body onto a fixed key.
+ *
+ * The counter objects below are indexed by this result. Returning a literal
+ * rather than the caller's own string means a payload such as
+ * {"severity": "__proto__"} or {"severity": "total"} can never become the
+ * property name being written — previously it created a junk key on the
+ * counter object and, in the "total" case, silently corrupted the scan totals
+ * that feed the quality score.
+ */
+function toSeverityKey(severity: unknown): SeverityKey | null {
+  switch (severity) {
+    case 'critical': return 'critical';
+    case 'high': return 'high';
+    case 'medium': return 'medium';
+    case 'low': return 'low';
+    case 'info': return 'info';
+    default: return null;
+  }
+}
+
 // Internal API key auth middleware
 function internalAuth(req: Request, res: Response, next: NextFunction): void {
   const key = req.headers['x-internal-api-key'] as string;
@@ -101,7 +124,10 @@ router.post('/findings/import', async (req: Request, res: Response): Promise<voi
         const effectiveStatus = priorStatus || 'open';
 
         if (effectiveStatus === 'open') {
-          totalFindings[finding.severity as keyof typeof totalFindings]++;
+          const severityKey = toSeverityKey(finding.severity);
+          if (severityKey) {
+            totalFindings[severityKey]++;
+          }
           totalFindings.total++;
         } else {
           deduplicatedCount++;
@@ -158,7 +184,10 @@ router.post('/findings/import', async (req: Request, res: Response): Promise<voi
     const rawFindings = { critical: 0, high: 0, medium: 0, low: 0, info: 0, total: 0 };
     for (const result of results) {
       for (const finding of result.findings || []) {
-        rawFindings[finding.severity as keyof typeof rawFindings]++;
+        const severityKey = toSeverityKey(finding.severity);
+        if (severityKey) {
+          rawFindings[severityKey]++;
+        }
         rawFindings.total++;
       }
     }

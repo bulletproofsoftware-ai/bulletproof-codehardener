@@ -106,6 +106,14 @@ export async function handleWorkflowStatus(args: Record<string, unknown>): Promi
 
   const executionId = args.executionId as string;
 
+  // executionId comes straight from an MCP tool caller and is interpolated into
+  // the n8n API URL below. n8n execution IDs are short opaque identifiers, so
+  // anything outside that alphabet (path traversal, a second scheme, encoded
+  // separators) is rejected rather than sent.
+  if (typeof executionId !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(executionId)) {
+    return { error: 'Invalid executionId' };
+  }
+
   try {
     const response = await fetch(
       `${env.N8N_URL}/api/v1/executions/${executionId}`,

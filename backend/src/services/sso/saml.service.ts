@@ -74,7 +74,12 @@ export interface SAMLAssertion {
   nameId: string;
   nameIdFormat: string;
   sessionIndex: string;
-  attributes: Record<string, string | string[]>;
+  /**
+   * Attribute names come from the (unauthenticated) SAML Response, so they are
+   * held in a Map rather than a plain object: a Map has no prototype chain to
+   * write through and no inherited keys to read back by accident.
+   */
+  attributes: Map<string, string | string[]>;
   issuer: string;
   inResponseTo: string;
   notBefore?: string;
@@ -312,15 +317,15 @@ export async function processSAMLResponse(
   const nameAttr = config.attributeMapping.name || 'name';
 
   let email = assertion.nameId;
-  if (assertion.attributes[emailAttr]) {
-    const attrVal = assertion.attributes[emailAttr];
-    email = Array.isArray(attrVal) ? attrVal[0] : attrVal;
+  const emailVal = assertion.attributes.get(emailAttr);
+  if (emailVal) {
+    email = Array.isArray(emailVal) ? emailVal[0] : emailVal;
   }
 
   let name: string | null = null;
-  if (assertion.attributes[nameAttr]) {
-    const attrVal = assertion.attributes[nameAttr];
-    name = Array.isArray(attrVal) ? attrVal[0] : attrVal;
+  const nameVal = assertion.attributes.get(nameAttr);
+  if (nameVal) {
+    name = Array.isArray(nameVal) ? nameVal[0] : nameVal;
   }
 
   if (!email) {
@@ -427,12 +432,23 @@ function parseSAMLAssertion(responseXml: string, config: SSOConfig): SAMLAsserti
     throw new UnauthorizedError(`SAML assertion issuer mismatch: expected ${config.idpEntityId}, got ${issuer}`);
   }
 
-  // Extract attributes
-  const attributes: Record<string, string> = {};
-  const attrRegex = /<[^>]*:?Attribute\s+Name="([^"]+)"[^>]*>[\s\S]*?<[^>]*:?AttributeValue[^>]*>([^<]+)</g;
+  // Extract attributes.
+  //
+  // responseXml is base64-decoded from an unauthenticated POST to the ACS
+  // endpoint, so this regex runs on hostile input. The previous pattern used
+  // `<[^>]*:?Attribute` and `[\s\S]*?<[^>]*:?AttributeValue`: `[^>]*` and
+  // `[\s\S]*?` can both consume '<', so every '<' in the document was a match
+  // start that backtracked across the rest of the document — quadratic time on
+  // a body of repeated '<'. Every quantifier below is bounded and its character
+  // class excludes the delimiter that follows it, so no position can be matched
+  // two different ways and the scan stays linear. The optional namespace prefix
+  // ("saml:", "saml2:", "ns2:") is matched explicitly instead of by a wildcard.
+  const attributes = new Map<string, string | string[]>();
+  const attrRegex =
+    /<(?:[A-Za-z0-9_.-]{1,64}:)?Attribute\s+Name="([^"<>]{1,256})"[^<>]{0,1024}>[^<]{0,4096}<(?:[A-Za-z0-9_.-]{1,64}:)?AttributeValue[^<>]{0,1024}>([^<]{1,4096})</g;
   let attrMatch;
   while ((attrMatch = attrRegex.exec(responseXml)) !== null) {
-    attributes[attrMatch[1]] = attrMatch[2].trim();
+    attributes.set(attrMatch[1], attrMatch[2].trim());
   }
 
   return {

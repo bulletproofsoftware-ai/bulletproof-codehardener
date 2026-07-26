@@ -363,8 +363,11 @@ export class SSRFValidator {
     try {
       const url = new URL(urlString);
 
-      // Must be github.com
-      if (!url.hostname.endsWith('github.com')) {
+      // Must be github.com. A bare endsWith('github.com') also accepts
+      // look-alike hosts such as "evilgithub.com", so match the apex host
+      // exactly and require a dot before the suffix for subdomains.
+      const host = url.hostname.toLowerCase();
+      if (host !== 'github.com' && !host.endsWith('.github.com')) {
         return { valid: false, error: 'URL must be a GitHub repository URL.' };
       }
 

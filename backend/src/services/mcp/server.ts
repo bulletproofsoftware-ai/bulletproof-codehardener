@@ -846,55 +846,61 @@ export async function executeMcpTool(
   // Default user context for stdio (single-user mode)
   const userId = (args._userId as string) || 'mcp-default-user';
 
-  // Check high-level tools first
-  const highLevelHandlers: Record<string, (args: Record<string, unknown>) => Promise<unknown>> = {
-    codehardener_scan_project: async (a) => {
+  // Check high-level tools first.
+  // A Map, not an object literal: `name` is caller-controlled, and an object
+  // lookup would resolve inherited keys — executeMcpTool('__proto__', ...)
+  // found Object.prototype (truthy, not callable) and threw a TypeError, while
+  // 'toString'/'constructor' dispatched to Object.prototype methods. Map.get
+  // only ever returns a handler that was explicitly registered here.
+  const highLevelHandlers = new Map<string, (args: Record<string, unknown>) => Promise<unknown>>(Object.entries({
+    codehardener_scan_project: async (a: Record<string, unknown>) => {
       const { handleScanProject } = await import('./tools/scan-project.js');
       return handleScanProject(a, userId);
     },
-    codehardener_get_findings: async (a) => {
+    codehardener_get_findings: async (a: Record<string, unknown>) => {
       const { handleGetFindings } = await import('./tools/query-defectdojo.js');
       return handleGetFindings(a, userId);
     },
-    codehardener_get_quality_score: async (a) => {
+    codehardener_get_quality_score: async (a: Record<string, unknown>) => {
       const { handleGetQualityScore } = await import('./tools/query-defectdojo.js');
       return handleGetQualityScore(a, userId);
     },
-    codehardener_get_trends: async (a) => {
+    codehardener_get_trends: async (a: Record<string, unknown>) => {
       const { handleGetTrends } = await import('./tools/query-defectdojo.js');
       return handleGetTrends(a, userId);
     },
-    codehardener_run_tests: async (a) => {
+    codehardener_run_tests: async (a: Record<string, unknown>) => {
       const { handleRunTests } = await import('./tools/workflows.js');
       return handleRunTests(a);
     },
-    codehardener_workflow_status: async (a) => {
+    codehardener_workflow_status: async (a: Record<string, unknown>) => {
       const { handleWorkflowStatus } = await import('./tools/workflows.js');
       return handleWorkflowStatus(a);
     },
-    codehardener_get_report: async (a) => {
+    codehardener_get_report: async (a: Record<string, unknown>) => {
       return handleReport(a as Record<string, any>, userId);
     },
-    codehardener_scan_file: async (a) => {
+    codehardener_scan_file: async (a: Record<string, unknown>) => {
       const { handleScanFile } = await import('./tools/scan-targeted.js');
       return handleScanFile(a, userId);
     },
-    codehardener_scan_diff: async (a) => {
+    codehardener_scan_diff: async (a: Record<string, unknown>) => {
       const { handleScanDiff } = await import('./tools/scan-targeted.js');
       return handleScanDiff(a, userId);
     },
-    codehardener_auto_fix: async (a) => {
+    codehardener_auto_fix: async (a: Record<string, unknown>) => {
       const { handleAutoFix } = await import('./tools/auto-fix.js');
       return handleAutoFix(a, userId);
     },
-    codehardener_bulk_fix: async (a) => {
+    codehardener_bulk_fix: async (a: Record<string, unknown>) => {
       const { handleBulkFix } = await import('./tools/auto-fix.js');
       return handleBulkFix(a, userId);
     },
-  };
+  }));
 
-  if (highLevelHandlers[name]) {
-    return highLevelHandlers[name](args);
+  const handler = highLevelHandlers.get(name);
+  if (handler) {
+    return handler(args);
   }
 
   // Fall back to existing handlers
