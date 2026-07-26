@@ -142,6 +142,62 @@ router.delete('/config', authenticate, async (req: Request, res: Response, next:
   }
 });
 
+/**
+ * Where the ACS response goes, decided from the SP's OWN stored `relay_state`.
+ *
+ * H-7. `req.body.RelayState` is unsigned attacker-controlled input on an
+ * unauthenticated endpoint, and it selects the URL an access token is delivered
+ * to. Origin allow-listing alone was not enough: the PATH and QUERY within an
+ * allowed origin were entirely attacker-chosen, and the `relay_state` this SP
+ * stored when it issued the AuthnRequest was collected and never compared.
+ *
+ * SAML 2.0 Core §3.4.3 requires the IdP to return RelayState EXACTLY as
+ * received, so the posted value has no legitimate reason to differ. It is
+ * therefore only ever COMPARED; the redirect is built from `stored`.
+ *
+ * Pure and exported so this decision is testable without an HTTP server.
+ */
+export type RelayDecision =
+  | { kind: 'json' }
+  | { kind: 'redirect'; url: URL }
+  | { kind: 'reject'; reason: 'relay_state_invalid' | 'relay_state_mismatch' | 'relay_state_origin' };
+
+export function resolveRelayTarget(
+  posted: unknown,
+  stored: string | null,
+  allowedOrigins: readonly string[]
+): RelayDecision {
+  // `express.urlencoded({ extended: true })` turns a bracketed or repeated field
+  // into an array or object. The previous bare `relayState.startsWith('http')`
+  // threw a TypeError on those — AFTER the tokens had been minted and the
+  // session promoted.
+  const parsed = z.string().optional().safeParse(posted);
+  if (!parsed.success) return { kind: 'reject', reason: 'relay_state_invalid' };
+
+  const postedValue = parsed.data ?? null;
+  if (postedValue !== stored) return { kind: 'reject', reason: 'relay_state_mismatch' };
+
+  if (stored === null || !stored.startsWith('http')) return { kind: 'json' };
+
+  let url: URL;
+  try {
+    url = new URL(stored);
+  } catch {
+    return { kind: 'reject', reason: 'relay_state_invalid' };
+  }
+
+  const originAllowed = allowedOrigins.some((o) => {
+    try {
+      return new URL(o).origin === url.origin;
+    } catch {
+      return false;
+    }
+  });
+  if (!originAllowed) return { kind: 'reject', reason: 'relay_state_origin' };
+
+  return { kind: 'redirect', url };
+}
+
 // ============================================================================
 // Public SAML endpoints (no authentication required)
 // ============================================================================
@@ -197,34 +253,31 @@ router.post('/saml/acs/:configId', async (req: Request, res: Response, next: Nex
     }
 
     const { configId } = z.object({ configId: z.string().uuid() }).parse(req.params);
-    const { user, tokens, isNewUser } = await processSAMLResponse(
+    const { user, tokens, isNewUser, relayState: storedRelayState } = await processSAMLResponse(
       samlResponse,
       configId
     );
 
-    const relayState = req.body.RelayState;
+    const decision = resolveRelayTarget(req.body.RelayState, storedRelayState, corsOrigins);
+    if (decision.kind === 'reject') {
+      // Our own literal, never the posted value: RelayState is attacker-authored.
+      logger.warn({ configId, reason: decision.reason }, 'SAML ACS RelayState rejected');
+      res.status(400).json({ error: 'Invalid RelayState' });
+      return;
+    }
 
-    // If relay state has a frontend URL, redirect with token (validate origin to prevent open redirect)
-    if (relayState && relayState.startsWith('http')) {
-      const allowedOrigins = corsOrigins;
-      let redirectUrl: URL;
-      try {
-        redirectUrl = new URL(relayState);
-      } catch {
-        res.status(400).json({ error: 'Invalid RelayState URL' });
-        return;
-      }
-      const originAllowed = allowedOrigins.some(o => {
-        try { return new URL(o).origin === redirectUrl.origin; } catch { return false; }
-      });
-      if (!originAllowed) {
-        res.status(400).json({ error: 'Redirect URL not in allowed origins' });
-        return;
-      }
-      // Use the validated URL object to construct the redirect (prevents open-redirect via raw string manipulation)
-      redirectUrl.searchParams.set('token', tokens.accessToken);
-      redirectUrl.searchParams.set('new', String(isNewUser));
-      res.redirect(redirectUrl.toString());
+    if (decision.kind === 'redirect') {
+      // Built from the STORED value, and from a parsed URL object rather than
+      // raw string manipulation.
+      //
+      // Residual, deliberately NOT changed here: the access token still travels
+      // as a query parameter, so it reaches browser history, the `Referer` of
+      // any subsequent request from the landing page, and intermediate proxy
+      // logs. Moving it to an HttpOnly cookie or a one-time exchange code is the
+      // right fix and is a dashboard-side change, not a route-side one.
+      decision.url.searchParams.set('token', tokens.accessToken);
+      decision.url.searchParams.set('new', String(isNewUser));
+      res.redirect(decision.url.toString());
       return;
     }
 

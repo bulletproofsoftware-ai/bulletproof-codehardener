@@ -56,6 +56,7 @@ export const DEFAULT_EMAIL = 'alice@example.test';
 
 export const SIG_ALG = {
   rsaSha256: 'http://www.w3.org/2001/04/xmldsig-more#rsa-sha256',
+  rsaSha512: 'http://www.w3.org/2001/04/xmldsig-more#rsa-sha512',
   rsaSha1: 'http://www.w3.org/2000/09/xmldsig#rsa-sha1',
 } as const;
 
@@ -90,8 +91,27 @@ export interface ResponseOverrides {
   audience?: string;
   noAudienceRestriction?: boolean;
   noConditions?: boolean;
+  /**
+   * Emit `<saml:Conditions>` with NO attributes at all. node-saml gates its
+   * whole timestamp block on `conditions.$` (`saml.js:842`), and xml2js only
+   * emits `$` for an element that has attributes — so this shape disables
+   * NotBefore/NotOnOrAfter enforcement entirely inside the library. Executed: a
+   * one-year-old assertion in this shape AUTHENTICATES against node-saml alone.
+   */
+  noConditionsAttributes?: boolean;
+  /** Emit `<saml:Conditions>` carrying only `NotBefore`. */
+  noConditionsNotOnOrAfter?: boolean;
+  /** Emit `<saml:Conditions>` carrying only `NotOnOrAfter` — no lower bound. */
+  noConditionsNotBefore?: boolean;
   recipient?: string;
   noRecipient?: boolean;
+  /**
+   * Emit a SECOND `<saml:SubjectConfirmation>` whose `SubjectConfirmationData`
+   * carries this `Recipient`, keeping the first one valid. §B.7 requires EVERY
+   * Recipient to match, not merely one — the shape that tells `.some` apart
+   * from `.every`.
+   */
+  secondRecipient?: string;
   destination?: string;
   /** `Response/@InResponseTo`. */
   inResponseTo?: string;
@@ -146,11 +166,27 @@ export function buildResponse(o: ResponseOverrides = {}): string {
   const nameIdEl =
     `<saml:NameID Format="urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress">${nameId}</saml:NameID>`;
 
+  const secondScdAttrs = [
+    `NotOnOrAfter="${scdNotOnOrAfter}"`,
+    `Recipient="${o.secondRecipient ?? ''}"`,
+    o.noScdInResponseTo ? '' : `InResponseTo="${scdInResponseTo}"`,
+  ]
+    .filter(Boolean)
+    .join(' ');
+
+  const secondConfirmation =
+    o.secondRecipient === undefined
+      ? ''
+      : `<saml:SubjectConfirmation Method="urn:oasis:names:tc:SAML:2.0:cm:bearer">` +
+        `<saml:SubjectConfirmationData ${secondScdAttrs}/>` +
+        `</saml:SubjectConfirmation>`;
+
   const subjectInner =
     `${nameIdEl}${o.duplicateNameId ? nameIdEl : ''}` +
     `<saml:SubjectConfirmation Method="urn:oasis:names:tc:SAML:2.0:cm:bearer">` +
     `<saml:SubjectConfirmationData ${scdAttrs}/>` +
-    `</saml:SubjectConfirmation>`;
+    `</saml:SubjectConfirmation>` +
+    secondConfirmation;
 
   const subjectEl = `<saml:Subject>${subjectInner}</saml:Subject>`;
 
@@ -158,9 +194,16 @@ export function buildResponse(o: ResponseOverrides = {}): string {
     ? ''
     : `<saml:AudienceRestriction><saml:Audience>${audience}</saml:Audience></saml:AudienceRestriction>`;
 
+  const conditionsAttrs = o.noConditionsAttributes
+    ? ''
+    : [
+        o.noConditionsNotBefore ? '' : ` NotBefore="${notBefore}"`,
+        o.noConditionsNotOnOrAfter ? '' : ` NotOnOrAfter="${notOnOrAfter}"`,
+      ].join('');
+
   const conditionsEl = o.noConditions
     ? ''
-    : `<saml:Conditions NotBefore="${notBefore}" NotOnOrAfter="${notOnOrAfter}">${audienceEl}</saml:Conditions>`;
+    : `<saml:Conditions${conditionsAttrs}>${audienceEl}</saml:Conditions>`;
 
   const attributeStatement =
     `<saml:AttributeStatement>` +
@@ -251,6 +294,66 @@ export function decoySignature(assertionId = DEFAULT_ASSERTION_ID): string {
     `<ds:DigestValue>AAAA</ds:DigestValue></ds:Reference></ds:SignedInfo>` +
     `<ds:SignatureValue>BBBB</ds:SignatureValue></ds:Signature>`
   );
+}
+
+/**
+ * Plant a decoy algorithm declaration INSIDE the real `<ds:Signature>`, before
+ * `<ds:SignedInfo>`, in a foreign namespace (H-1).
+ *
+ * This is the attacker-reachable shape and nothing here is protected by
+ * cryptography: `<ds:SignatureValue>` covers `canon(SignedInfo)` only, and the
+ * enveloped-signature transform strips the entire `<ds:Signature>` subtree from
+ * the assertion digest — so an attacker can add this to a genuinely signed
+ * response and neither the signature nor the digest changes.
+ *
+ * `xml-crypto` resolves the algorithm it VERIFIES WITH by
+ * `.//*[local-name(.)='SignatureMethod']/@Algorithm` over the whole signature
+ * subtree, namespace-agnostic, first in document order (`signed-xml.js:462`,
+ * `:469`) — so it reads this decoy. The module's own pin read
+ * `ds:SignedInfo/ds:SignatureMethod`. Two selectors, one document, different
+ * answers: the pin could report a strong algorithm while a weak one ran.
+ *
+ * A FOREIGN namespace prefix is required: node-saml rejects a signature with
+ * more than two ds-namespaced `<Transform>` descendants (`xml.js:63`), and
+ * ds-namespaced decoys would also collide with our own cardinality checks
+ * rather than exercising the cross-library divergence this models.
+ *
+ * @param localName the element to shadow — `SignatureMethod` or
+ *                  `CanonicalizationMethod`.
+ */
+export function withAlgorithmDecoyInSignature(
+  signedXml: string,
+  localName: 'SignatureMethod' | 'CanonicalizationMethod',
+  algorithm: string
+): string {
+  const decoy =
+    `<ds:Object xmlns:ds="${DS_NS}"><x:${localName} xmlns:x="urn:decoy:test" ` +
+    `Algorithm="${algorithm}"/></ds:Object>`;
+  const signature = signatureElementOf(signedXml);
+  // Inserted as the FIRST child of <Signature>, ahead of <SignedInfo>, so it
+  // wins xml-crypto's document-order descendant search.
+  const opening = signature.slice(0, signature.indexOf('>') + 1);
+  return signedXml.replace(signature, signature.replace(opening, `${opening}${decoy}`));
+}
+
+/**
+ * Append a well-formedness WARNING-class malformation to an already-signed
+ * response: `count` attributes with unquoted values (NEW-1).
+ *
+ * `@xmldom/xmldom` classifies an unquoted attribute value as a *warning*, not an
+ * error, so node-saml's strict parse does NOT reject it and the document
+ * survives all the way to signature verification — where `xml-crypto`'s
+ * unconfigured `DOMParser` writes one `console.warn` line per malformation,
+ * each carrying the attacker's chosen attribute name verbatim. Executed before
+ * the fix: 1 / 50 / 400 attributes produced 1 / 50 / 400 stderr writes on a
+ * response that AUTHENTICATED SUCCESSFULLY.
+ *
+ * The marker name is attacker-chosen on purpose — it is the needle a log-hygiene
+ * test looks for.
+ */
+export function withUnquotedAttributes(signedXml: string, count = 1, marker = 'ATTACKERMARKER'): string {
+  const attrs = Array.from({ length: count }, (_, i) => `${marker}${i}=UNQUOTED`).join(' ');
+  return signedXml.replace('</samlp:Response>', `<junk ${attrs}/></samlp:Response>`);
 }
 
 /** The POST body the ACS endpoint receives. */

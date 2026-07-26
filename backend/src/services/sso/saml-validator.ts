@@ -85,6 +85,7 @@ export type SamlRejectReason =
   | 'response_missing'
   | 'response_too_large'
   | 'response_root_invalid'
+  | 'response_not_wellformed'
   | 'doctype_forbidden'
   | 'library_validation_failed'
   | 'idp_cert_unusable'
@@ -93,19 +94,34 @@ export type SamlRejectReason =
   | 'issuer_missing'
   | 'issuer_mismatch'
   | 'conditions_missing'
+  | 'conditions_incomplete'
+  | 'conditions_expired'
+  | 'conditions_not_yet_valid'
   | 'recipient_missing'
   | 'recipient_mismatch'
   | 'destination_mismatch'
   | 'inresponseto_missing'
   | 'inresponseto_mismatch'
   | 'weak_signature_algorithm'
+  | 'signature_algorithm_divergence'
   | 'assertion_id_missing'
   | 'assertion_id_invalid'
   | 'assertion_replayed'
   | 'session_not_consumed'
   | 'user_not_in_team'
   | 'user_not_sso_linked'
+  /**
+   * Defence-in-depth backstop in `resolveSSOUser`. Executed probing shows it is
+   * currently UNREACHABLE by construction: `readVerifiedAssertion` already
+   * requires a non-empty `<NameID>`, and xml2js maps empty or whitespace-only
+   * element content to the plain string `''` (not `{ _: '' }`), which `textOf`
+   * drops — so `readAttributes` can never store an empty attribute value for the
+   * mapped email attribute to override it with. The invariant that guard depends
+   * on is pinned by a test; the guard stays because losing it silently the day
+   * that parse behaviour changes would be an authentication defect.
+   */
   | 'email_missing'
+  | 'user_provisioning_failed'
   | 'user_not_provisionable';
 
 /** Only values we own may appear here. Nothing attacker-derived. */
@@ -182,22 +198,64 @@ export function decodeAndScreenResponse(samlResponse: unknown, ctx: SamlLogConte
 }
 
 /**
- * Parse the raw response for the two non-authoritative reads we are allowed to
- * make from it: the advisory `Destination` check and the `SignedInfo` algorithm
- * read. Everything security-relevant otherwise comes from the verified bytes.
+ * `@node-saml/node-saml` normalises line endings before handing the document to
+ * `xml-crypto` (`xml.js` `normalizeNewlines`). The well-formedness screen below
+ * must see the SAME octets `xml-crypto` will parse, or a diagnostic that only
+ * appears after normalisation would slip past it.
+ */
+function normalizeNewlines(xml: string): string {
+  return xml.replace(/\r\n?/g, '\n');
+}
+
+/**
+ * Parse the raw response, and REJECT any document that is not strictly
+ * well-formed.
  *
- * The `errorHandler` is MANDATORY, not defensive style. `@xmldom/xmldom` 0.8.x
- * does NOT throw on malformed input: it writes attacker-controlled text to
- * `console.error` and returns a partial document, and `try`/`catch` cannot
- * intercept that. Executed: one crafted body with 30 bad entity references
- * produced 30 `console.error` calls with the default handler and 0 with this
- * one. Both the text and the call count are attacker-controlled.
+ * Two jobs, in this order:
+ *
+ * 1. WELL-FORMEDNESS SCREEN (§B.3.1 note). This is not a security read of
+ *    unverified data — no value from this document reaches any decision here —
+ *    so it does not violate the "verified bytes only" rule. It exists because
+ *    THREE parsers see the attacker's body and only two of them are ours to
+ *    configure: `xml-crypto` calls `new xmldom.DOMParser().parseFromString(xml)`
+ *    with NO options (`signed-xml.js:179`, `:456`, `:645`), which gives it
+ *    xmldom's default handler — `warning` writes to `console.warn`, `error` to
+ *    `console.error`. An unquoted attribute value is a xmldom *warning*, which
+ *    node-saml's strict parse does NOT reject, so such a document survives to
+ *    signature verification and writes attacker-chosen text to stderr, 1:1 with
+ *    the number of malformations (executed: 1/50 attrs -> 1/50 writes, on a
+ *    response that authenticated successfully). Rejecting warning-class
+ *    documents here — before node-saml, therefore before xml-crypto — is what
+ *    makes REQ-009 / AC-10 true rather than merely asserted. It also collapses
+ *    the three-parser behavioural divergence into one.
+ *
+ *    The handler RECORDS rather than no-ops: silencing alone left the channel
+ *    open in the parser we do not own.
+ *
+ * 2. The two non-authoritative reads we are allowed to make from the raw
+ *    response: the advisory `Destination` check and the algorithm pin. Both run
+ *    only after `validateSignedResponse` has succeeded.
+ *
+ * `@xmldom/xmldom` 0.8.x does NOT throw on malformed input — it returns a
+ * partial document — so `try`/`catch` cannot substitute for this handler.
  */
 export function parseResponseDom(responseXml: string, ctx: SamlLogContext): Document {
-  const doc = new DOMParser({ locator: {}, errorHandler: () => {} }).parseFromString(
-    responseXml,
-    'text/xml'
-  );
+  let diagnostics = 0;
+  const record = (): void => {
+    diagnostics += 1;
+  };
+  const doc = new DOMParser({
+    locator: {},
+    // Never `(msg) => ...`: the message embeds attacker-chosen text, and this
+    // module's whole logging discipline is that no attacker value is ever
+    // carried anywhere. The COUNT is all we keep, and even that is not logged.
+    errorHandler: { warning: record, error: record, fatalError: record },
+  }).parseFromString(normalizeNewlines(responseXml), 'text/xml');
+
+  if (diagnostics > 0) {
+    rejectSaml('response_not_wellformed', ctx);
+  }
+
   // localName !== 'Response' also covers null / partial-parse results.
   const root: Element | null = doc == null ? null : doc.documentElement;
   if (root === null || root.localName !== 'Response') {
@@ -245,37 +303,64 @@ function elementChildren(parent: Element, localName: string, namespaceUri: strin
   return out;
 }
 
+/**
+ * First element in DOCUMENT ORDER, strictly below `root`, whose `localName`
+ * matches — in ANY namespace.
+ *
+ * This deliberately mirrors `xml-crypto`'s `xpath.select1(".//*[local-name(.)=
+ * 'X']/@Algorithm", signatureNode)` (`signed-xml.js:462`, `:469`) exactly:
+ * descendant-or-self of the signature EXCLUDING the signature element itself,
+ * namespace-agnostic, first hit wins. It is not how WE would select a node — it
+ * is how the library that performs the cryptography selects one, which is the
+ * only selection whose result is load-bearing.
+ */
+function firstDescendantByLocalName(root: Element, localName: string): Element | null {
+  const kids = root.childNodes;
+  for (let i = 0; i < kids.length; i += 1) {
+    const node = kids[i];
+    if (node == null || node.nodeType !== 1) continue;
+    const el = node as Element;
+    if (el.localName === localName) return el;
+    const nested = firstDescendantByLocalName(el, localName);
+    if (nested !== null) return nested;
+  }
+  return null;
+}
+
 // ============================================================================
 // §B.15 — signature / digest / canonicalization algorithm pinning
 // ============================================================================
 
+/** The four algorithm facts a signature commits to. */
+interface SignatureAlgorithms {
+  canonicalization: string;
+  signature: string;
+  digest: string;
+  transforms: string[];
+  referenceUri: string;
+}
+
+const NO_ALGORITHM = '';
+
+function algorithmOf(element: Element | null): string {
+  return element === null ? NO_ALGORITHM : element.getAttribute('Algorithm') ?? NO_ALGORITHM;
+}
+
 /**
- * Reading algorithms back from the raw DOM is the ONE legitimate exception to
- * "never trust the raw response", and it is sound for a specific reason:
- * `<SignedInfo>` IS precisely the octet stream that `<SignatureValue>` covers.
- * Tampering with any of these attributes invalidates the signature, which
- * node-saml has already verified by the time this runs. So the values read back
- * are exactly the values that were used.
- *
- * That reasoning holds only for the RIGHT `<Signature>` element, which is why
- * selection below is structural. It must run AFTER validation, never before.
+ * OUR reading: namespace-qualified DIRECT children, the strict SAML-shaped
+ * layout. Cardinality is asserted at every level, so this read is unambiguous
+ * by construction.
  */
-function pinSignatureElement(signature: Element, ownerId: string | null, ctx: SamlLogContext): void {
+function structuralAlgorithms(signature: Element, ctx: SamlLogContext): SignatureAlgorithms {
   const signedInfos = elementChildren(signature, 'SignedInfo', DS_NS);
   if (signedInfos.length !== 1) rejectSaml('weak_signature_algorithm', ctx);
   const signedInfo = signedInfos[0];
 
   const signatureMethods = elementChildren(signedInfo, 'SignatureMethod', DS_NS);
   if (signatureMethods.length !== 1) rejectSaml('weak_signature_algorithm', ctx);
-  if (!ALLOWED_SIGNATURE_ALGORITHMS.has(signatureMethods[0].getAttribute('Algorithm') ?? '')) {
-    rejectSaml('weak_signature_algorithm', ctx);
-  }
 
   const c14nMethods = elementChildren(signedInfo, 'CanonicalizationMethod', DS_NS);
   if (c14nMethods.length !== 1) rejectSaml('weak_signature_algorithm', ctx);
-  if ((c14nMethods[0].getAttribute('Algorithm') ?? '') !== EXCLUSIVE_C14N) {
-    rejectSaml('weak_signature_algorithm', ctx);
-  }
 
   // xml.js:73-87 already requires exactly one Reference on anything it verifies.
   // Asserted again here so this control does not depend on that.
@@ -285,25 +370,136 @@ function pinSignatureElement(signature: Element, ownerId: string | null, ctx: Sa
 
   const digestMethods = elementChildren(reference, 'DigestMethod', DS_NS);
   if (digestMethods.length !== 1) rejectSaml('weak_signature_algorithm', ctx);
-  // The digest is what a chosen-prefix collision attack targets, and
-  // chosen-prefix SHA-1 collisions have been practical at commodity cost since
-  // 2020. A strong signature over a SHA-1 digest is the dangerous shape.
-  if (!ALLOWED_DIGEST_ALGORITHMS.has(digestMethods[0].getAttribute('Algorithm') ?? '')) {
+
+  // NEW-2: exactly one <Transforms>, never zero. The previous `for … of` over a
+  // possibly-empty list meant "no <Transforms>" silently SKIPPED the allowlist —
+  // the same "absence => pass" shape §B.4 exists to eliminate.
+  const transformsNodes = elementChildren(reference, 'Transforms', DS_NS);
+  if (transformsNodes.length !== 1) rejectSaml('weak_signature_algorithm', ctx);
+  const transformNodes = elementChildren(transformsNodes[0], 'Transform', DS_NS);
+  if (transformNodes.length === 0) rejectSaml('weak_signature_algorithm', ctx);
+
+  return {
+    canonicalization: algorithmOf(c14nMethods[0]),
+    signature: algorithmOf(signatureMethods[0]),
+    digest: algorithmOf(digestMethods[0]),
+    transforms: transformNodes.map(algorithmOf),
+    referenceUri: reference.getAttribute('URI') ?? '',
+  };
+}
+
+/**
+ * XML-CRYPTO'S reading — the one that decides which cryptography actually runs.
+ *
+ * Reproduced from the installed `xml-crypto@6.1.2` build, not from its docs:
+ *   - `signed-xml.js:462` c14n      = `.//*[local-name(.)='CanonicalizationMethod']/@Algorithm`
+ *   - `signed-xml.js:469` signature = `.//*[local-name(.)='SignatureMethod']/@Algorithm`
+ *   - `signed-xml.js:474` SignedInfo = `utils.findChildren(signatureNode, 'SignedInfo')`
+ *   - `signed-xml.js:497` Reference  = `utils.findChildren(signedInfo, 'Reference')`
+ *   - `signed-xml.js:517` digest     = `utils.findChildren(refNode, 'DigestMethod')[0]`
+ *   - `signed-xml.js:540` transforms = `findChildren(refNode,'Transforms')[0]` -> `Transform` children
+ * `utils.findChildren` (`utils.js:28-40`) treats a null namespace as "match any",
+ * so every one of those is NAMESPACE-AGNOSTIC, and the first two are DESCENDANT
+ * searches over the whole `<ds:Signature>` subtree in document order.
+ *
+ * A decoy `<x:SignatureMethod>` planted before `<ds:SignedInfo>` therefore
+ * chooses the verification algorithm while sitting OUTSIDE the signed octets:
+ * `SignatureValue` covers `canon(SignedInfo)` only, and the enveloped-signature
+ * transform strips the whole `<ds:Signature>` subtree from the assertion digest.
+ * Executed divergence proof and the SHA-1 chosen-prefix chain it re-enables:
+ * `.conductor/reviews/ADVERSARIAL-review-saml.md` H-1.
+ */
+function effectiveAlgorithms(signature: Element, ctx: SamlLogContext): SignatureAlgorithms {
+  const signedInfos = elementChildren(signature, 'SignedInfo', null);
+  if (signedInfos.length !== 1) rejectSaml('weak_signature_algorithm', ctx);
+  const signedInfo = signedInfos[0];
+
+  const references = elementChildren(signedInfo, 'Reference', null);
+  if (references.length !== 1) rejectSaml('weak_signature_algorithm', ctx);
+  const reference = references[0];
+
+  const digestMethods = elementChildren(reference, 'DigestMethod', null);
+  if (digestMethods.length !== 1) rejectSaml('weak_signature_algorithm', ctx);
+
+  const transformsNodes = elementChildren(reference, 'Transforms', null);
+  if (transformsNodes.length !== 1) rejectSaml('weak_signature_algorithm', ctx);
+  const transformNodes = elementChildren(transformsNodes[0], 'Transform', null);
+  if (transformNodes.length === 0) rejectSaml('weak_signature_algorithm', ctx);
+
+  return {
+    canonicalization: algorithmOf(firstDescendantByLocalName(signature, 'CanonicalizationMethod')),
+    signature: algorithmOf(firstDescendantByLocalName(signature, 'SignatureMethod')),
+    digest: algorithmOf(digestMethods[0]),
+    transforms: transformNodes.map(algorithmOf),
+    referenceUri: reference.getAttribute('URI') ?? '',
+  };
+}
+
+function sameAlgorithms(a: SignatureAlgorithms, b: SignatureAlgorithms): boolean {
+  return (
+    a.canonicalization === b.canonicalization &&
+    a.signature === b.signature &&
+    a.digest === b.digest &&
+    a.referenceUri === b.referenceUri &&
+    a.transforms.length === b.transforms.length &&
+    a.transforms.every((value, index) => value === b.transforms[index])
+  );
+}
+
+/**
+ * Reading algorithms back from the raw DOM is the ONE legitimate exception to
+ * "never trust the raw response", and it is sound for a specific reason:
+ * `<SignedInfo>` IS precisely the octet stream that `<SignatureValue>` covers.
+ * Tampering with any attribute inside it invalidates the signature, which
+ * node-saml has already verified by the time this runs.
+ *
+ * That reasoning holds only for the RIGHT `<Signature>` element AND for the
+ * right node WITHIN it. Selection of the element is structural (position in the
+ * tree). Selection within it is done TWICE — once the way this module reads a
+ * SAML signature, once the way `xml-crypto` actually resolved it — and the two
+ * must agree. §0.3 forbids letting attacker-supplied data choose which object
+ * you validate; H-1 showed that rule has to hold at the library boundary too,
+ * not only at the document level.
+ *
+ * The allowlists are applied to the EFFECTIVE values — what ran — never to the
+ * structural ones alone. Must run AFTER validation, never before.
+ */
+function pinSignatureElement(signature: Element, ownerId: string | null, ctx: SamlLogContext): void {
+  const structural = structuralAlgorithms(signature, ctx);
+  const effective = effectiveAlgorithms(signature, ctx);
+
+  // Any disagreement means there is more than one candidate node and the
+  // library picked one we did not inspect. There is no safe way to continue:
+  // the value we would pin is not the value that ran.
+  if (!sameAlgorithms(structural, effective)) {
+    rejectSaml('signature_algorithm_divergence', ctx);
+  }
+
+  if (!ALLOWED_SIGNATURE_ALGORITHMS.has(effective.signature)) {
     rejectSaml('weak_signature_algorithm', ctx);
   }
 
-  for (const transforms of elementChildren(reference, 'Transforms', DS_NS)) {
-    for (const transform of elementChildren(transforms, 'Transform', DS_NS)) {
-      if (!ALLOWED_TRANSFORMS.has(transform.getAttribute('Algorithm') ?? '')) {
-        rejectSaml('weak_signature_algorithm', ctx);
-      }
+  if (effective.canonicalization !== EXCLUSIVE_C14N) {
+    rejectSaml('weak_signature_algorithm', ctx);
+  }
+
+  // The digest is what a chosen-prefix collision attack targets, and
+  // chosen-prefix SHA-1 collisions have been practical at commodity cost since
+  // 2020. A strong signature over a SHA-1 digest is the dangerous shape.
+  if (!ALLOWED_DIGEST_ALGORITHMS.has(effective.digest)) {
+    rejectSaml('weak_signature_algorithm', ctx);
+  }
+
+  for (const transform of effective.transforms) {
+    if (!ALLOWED_TRANSFORMS.has(transform)) {
+      rejectSaml('weak_signature_algorithm', ctx);
     }
   }
 
   // POST-SELECTION consistency assertion — never the selector. `Reference/@URI`
   // is the one field an attacker sets freely, so it may confirm a structural
   // choice but must never make one.
-  if (ownerId === null || reference.getAttribute('URI') !== `#${ownerId}`) {
+  if (ownerId === null || effective.referenceUri !== `#${ownerId}`) {
     rejectSaml('weak_signature_algorithm', ctx);
   }
 }
@@ -393,8 +589,10 @@ export interface VerifiedAssertion {
   recipients: string[];
   /** Every `SubjectConfirmationData/@InResponseTo` present. */
   subjectInResponseTo: string[];
-  conditionsNotBefore: string | null;
-  conditionsNotOnOrAfter: string | null;
+  /** Always present: `readVerifiedAssertion` rejects an assertion without it. */
+  conditionsNotBefore: string;
+  /** Always present: `readVerifiedAssertion` rejects an assertion without it. */
+  conditionsNotOnOrAfter: string;
 }
 
 /**
@@ -444,6 +642,23 @@ export function readVerifiedAssertion(profile: Profile, ctx: SamlLogContext): Ve
   if (conditionsList.length !== 1) rejectSaml('assertion_malformed', ctx);
   const conditions = conditionsList[0];
 
+  // H-2 — the element being PRESENT is not enough.
+  //
+  // `saml.js:842` is `if (conditions && conditions.$)`. xml2js only emits the
+  // `$` key when an element carries at least one attribute, so a `<Conditions>`
+  // with ZERO attributes has no `$` and node-saml skips its ENTIRE timestamp
+  // block — NotBefore and NotOnOrAfter are never enforced. The audience check
+  // sits outside that guard, so the assertion is accepted rather than erroring.
+  // Executed: an assertion with `IssueInstant` backdated one year and
+  // `<Conditions/>` bare AUTHENTICATES. `NotOnOrAfter`-only is likewise accepted
+  // with no lower bound. That defeats REQ-004 outright for anyone holding a
+  // valid signature, so both attributes are required HERE and the window is
+  // enforced by `checkConditionsWindow` below rather than delegated.
+  const notBefore = attrOf(conditions, 'NotBefore');
+  const notOnOrAfter = attrOf(conditions, 'NotOnOrAfter');
+  if (notBefore === null || notBefore.length === 0) rejectSaml('conditions_incomplete', ctx);
+  if (notOnOrAfter === null || notOnOrAfter.length === 0) rejectSaml('conditions_incomplete', ctx);
+
   const issuer = textOf(issuers[0]);
   if (typeof issuer !== 'string' || issuer.length === 0) rejectSaml('issuer_missing', ctx);
 
@@ -477,8 +692,8 @@ export function readVerifiedAssertion(profile: Profile, ctx: SamlLogContext): Ve
     attributes: readAttributes(assertion),
     recipients,
     subjectInResponseTo,
-    conditionsNotBefore: attrOf(conditions, 'NotBefore'),
-    conditionsNotOnOrAfter: attrOf(conditions, 'NotOnOrAfter'),
+    conditionsNotBefore: notBefore,
+    conditionsNotOnOrAfter: notOnOrAfter,
   };
 }
 
@@ -584,6 +799,32 @@ export function checkSubjectInResponseTo(
 }
 
 /**
+ * §B.? / REQ-004 — enforce the assertion lifetime OURSELVES.
+ *
+ * node-saml does enforce this window, but only for assertions whose
+ * `<Conditions>` element carries at least one attribute (`saml.js:842`,
+ * `if (conditions && conditions.$)`). `readVerifiedAssertion` now makes both
+ * attributes mandatory, which closes that gap at the input; this function is
+ * what makes the enforcement OURS rather than a property of a third-party
+ * `if`. Same clock, same `SAML_CLOCK_SKEW_MS` the library is configured with, so
+ * the accepted window is identical and an in-skew assertion still authenticates.
+ *
+ * Unparseable timestamps are `conditions_incomplete`, not a silent pass: this is
+ * the exact place where `Number.isNaN(...) ? accept : compare` would reopen H-2.
+ */
+export function checkConditionsWindow(assertion: VerifiedAssertion, ctx: SamlLogContext): void {
+  const notBefore = Date.parse(assertion.conditionsNotBefore);
+  const notOnOrAfter = Date.parse(assertion.conditionsNotOnOrAfter);
+  if (Number.isNaN(notBefore) || Number.isNaN(notOnOrAfter)) {
+    rejectSaml('conditions_incomplete', ctx);
+  }
+
+  const now = Date.now();
+  if (now < notBefore - samlClockSkewMs) rejectSaml('conditions_not_yet_valid', ctx);
+  if (now >= notOnOrAfter + samlClockSkewMs) rejectSaml('conditions_expired', ctx);
+}
+
+/**
  * How long a consumed assertion ID must be remembered: exactly as long as the
  * assertion could still be replayed successfully, i.e. its own `NotOnOrAfter`
  * plus the accepted clock skew, floored so a pathologically short window still
@@ -591,10 +832,7 @@ export function checkSubjectInResponseTo(
  */
 export function assertionReplayExpiry(assertion: VerifiedAssertion): Date {
   const floor = Date.now() + ASSERTION_REPLAY_MIN_RETENTION_MS;
-  const notOnOrAfter =
-    assertion.conditionsNotOnOrAfter === null
-      ? Number.NaN
-      : Date.parse(assertion.conditionsNotOnOrAfter);
+  const notOnOrAfter = Date.parse(assertion.conditionsNotOnOrAfter);
   const bound = Number.isNaN(notOnOrAfter) ? floor : notOnOrAfter + samlClockSkewMs;
   return new Date(Math.max(floor, bound));
 }

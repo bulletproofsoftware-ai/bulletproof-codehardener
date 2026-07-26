@@ -78,13 +78,17 @@ import { processSAMLResponse, initiateSAMLLogin, type SSOConfig } from './saml.s
 import {
   SAML_GENERIC_FAILURE,
   SAML_MAX_RESPONSE_BYTES,
+  checkConditionsWindow,
   checkSubjectInResponseTo,
   parseResponseDom,
+  pinAlgorithms,
+  readVerifiedAssertion,
   type SamlLogContext,
   type VerifiedAssertion,
 } from './saml-validator.js';
+import { SsoSessionCacheProvider } from './sso-session-cache.js';
 import { UnauthorizedError } from '../../middleware/errorHandler.js';
-import { SAML, ValidateInResponseTo } from '@node-saml/node-saml';
+import { SAML, ValidateInResponseTo, type Profile } from '@node-saml/node-saml';
 import { DOMParser } from '@xmldom/xmldom';
 import {
   ATTACKER_PRIVATE_KEY_PEM,
@@ -105,8 +109,11 @@ import {
   decoySignature,
   malformedEntityBody,
   signAssertion,
+  signEnvelope,
   toPostBody,
+  withAlgorithmDecoyInSignature,
   withDoctype,
+  withUnquotedAttributes,
   xswAdviceNested,
   xswDoubleSignature,
   xswDuplicateIdInExtensions,
@@ -156,6 +163,17 @@ let executed: string[] = [];
 let configRow: Record<string, unknown> | null;
 let sessionSeq = 0;
 let userSeq = 0;
+/**
+ * Forces the atomic consume to match zero rows, modelling the outcome the
+ * `WHERE status='pending'` predicate produces for the LOSER of two concurrent
+ * POSTs. That branch is the compensation for node-saml's documented TOCTOU and
+ * had no test at all (adversarial H-6).
+ */
+let consumeMatchesZeroRows = false;
+/** Forces `INSERT INTO users` to raise, modelling a unique violation (NEW-3). */
+let userInsertThrows = false;
+/** Forces the promotion UPDATE to match zero rows (NEW-3 / L-1). */
+let promotionMatchesZeroRows = false;
 
 function defaultConfigRow(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -235,6 +253,7 @@ function installDbMock(): void {
     // literal 'failed' (in its WHERE clause), so discrimination must be on the
     // SET clause, not on a bare substring.
     if (s.includes("SET status = 'completed'")) {
+      if (promotionMatchesZeroRows) return { rows: [], rowCount: 0 };
       const row = sessions.find((r) => r.id === v[1] && r.status === 'failed');
       if (!row) return { rows: [], rowCount: 0 };
       row.status = 'completed';
@@ -244,12 +263,15 @@ function installDbMock(): void {
 
     // removeAsync — the atomic consume into the NEUTRAL 'failed' state.
     if (s.includes("SET status = 'failed'")) {
+      if (consumeMatchesZeroRows) return { rows: [], rowCount: 0 };
       const row = sessions.find(
         (r) => r.request_id === v[0] && r.sso_config_id === v[1] && r.status === 'pending'
       );
       if (!row) return { rows: [], rowCount: 0 };
       row.status = 'failed';
-      return { rows: [{ id: row.id }], rowCount: 1 };
+      // `relay_state` rides back on the SAME atomic statement (H-7): the ACS
+      // route may only compare the posted RelayState against this value.
+      return { rows: [{ id: row.id, relay_state: row.relay_state }], rowCount: 1 };
     }
 
     if (s.includes('INSERT INTO saml_assertion_replay')) {
@@ -281,6 +303,11 @@ function installDbMock(): void {
     }
 
     if (s.includes('INSERT INTO users')) {
+      if (userInsertThrows) {
+        throw new Error(
+          'duplicate key value violates unique constraint "users_email_key" DETAIL: Key (email)=(bob@example.test) already exists.'
+        );
+      }
       userSeq += 1;
       const row: UserRecord = {
         id: `user-new-${userSeq}`,
@@ -307,13 +334,18 @@ function installDbMock(): void {
 // Assertions shared by every rejection test
 // ============================================================================
 
+/** The structured `reason` of a single recorded log call, if it carries one. */
+function rejectionReasonOf(call: { args: unknown[] }): string | undefined {
+  const first = call.args[0];
+  if (typeof first !== 'object' || first === null || !('reason' in first)) return undefined;
+  return (first as { reason?: string }).reason;
+}
+
 /** The structured reason from the last rejection the service logged. */
 function rejectionReason(): string | undefined {
-  const withReason = loggerCalls.filter(
-    (c) => typeof c.args[0] === 'object' && c.args[0] !== null && 'reason' in (c.args[0] as object)
-  );
+  const withReason = loggerCalls.filter((c) => rejectionReasonOf(c) !== undefined);
   const last = withReason.at(-1);
-  return last ? ((last.args[0] as { reason?: string }).reason) : undefined;
+  return last ? rejectionReasonOf(last) : undefined;
 }
 
 /**
@@ -361,6 +393,9 @@ beforeEach(() => {
   configRow = defaultConfigRow();
   sessionSeq = 0;
   userSeq = 0;
+  consumeMatchesZeroRows = false;
+  userInsertThrows = false;
+  promotionMatchesZeroRows = false;
   generateTokens.mockClear();
   dbExecute.mockReset();
   installDbMock();
@@ -403,6 +438,22 @@ describe('REQ-001 signature verification', () => {
     const result = await processSAMLResponse(post(), SSO_CONFIG_ID);
     expect(result.user.email).toBe(DEFAULT_EMAIL);
     expect(generateTokens).toHaveBeenCalledTimes(1);
+  });
+
+  it('TEST-001b rejects a response signed ONLY at the <Response> envelope, assertion unsigned', async () => {
+    // QA GAP-4. `wantAssertionsSigned: true -> false` broke NO test, and QA
+    // proved by probing node-saml 5.1.0 directly that the mutation is NOT
+    // equivalent: this exact shape is REJECTED with the flag true and ACCEPTED
+    // with it false. It is the one shape the flag is load-bearing for, and
+    // nothing in the suite signed the envelope alone — TEST-013e signs both.
+    //
+    // The specific reason matters: with the flag flipped, node-saml accepts and
+    // the request instead dies at `pinAlgorithms` (no <Signature> that is a
+    // direct child of the <Assertion>) with `weak_signature_algorithm`, so
+    // asserting the exact reason is what turns this red.
+    const xml = signEnvelope(buildResponse());
+    expect(xml).toContain('<Signature');
+    await expectRejection(toPostBody(xml), 'library_validation_failed');
   });
 
   it('returns the constant generic message, never a per-reason one', async () => {
@@ -531,7 +582,38 @@ describe('REQ-002 signature wrapping', () => {
   });
 
   it('never resolves to the attacker-named subject in any wrapping shape', async () => {
+    // H-4. This assertion is the only one in the file phrased as the ATTACK
+    // OUTCOME rather than as a rejection reason, and it used to run no code at
+    // all: `users` is reassigned in the top-level `beforeEach`, so it asserted
+    // that freshly-initialised state lacked a value nothing had ever written.
+    // It passed identically against an implementation in which all five wrapping
+    // shapes authenticate `admin@example.test`. The shapes are now actually
+    // POSTed before the outcome is checked.
+    // `carriesAttacker` records which shapes actually plant
+    // `admin@example.test` in the document. Asserting containment on the two
+    // that do not would be a false claim; asserting it on the three that do is
+    // what stops this test going vacuous if a fixture stops injecting it.
+    const shapes: { label: string; xml: string; carriesAttacker: boolean }[] = [
+      { label: 'sibling assertion', xml: xswSiblingAssertion(), carriesAttacker: true },
+      { label: 'relocated signature', xml: xswRelocatedSignature(), carriesAttacker: false },
+      { label: 'duplicate ID in Extensions', xml: xswDuplicateIdInExtensions(), carriesAttacker: true },
+      { label: 'advice-nested', xml: xswAdviceNested(), carriesAttacker: true },
+      { label: 'double signature', xml: xswDoubleSignature(), carriesAttacker: false },
+    ];
+    expect(shapes.filter((s) => s.carriesAttacker)).toHaveLength(3);
+
+    for (const { label, xml, carriesAttacker } of shapes) {
+      if (carriesAttacker) expect(xml, label).toContain('admin@example.test');
+      sessions = [];
+      addPendingSession();
+      await expect(processSAMLResponse(toPostBody(xml), SSO_CONFIG_ID), label).rejects.toThrow(
+        UnauthorizedError
+      );
+    }
+
     expect(users.some((u) => u.email === 'admin@example.test')).toBe(false);
+    expect(generateTokens).not.toHaveBeenCalled();
+    expect(replayStore.size).toBe(0);
   });
 });
 
@@ -583,6 +665,151 @@ describe('REQ-004 Conditions time window', () => {
   it('rejects an assertion with no <Conditions> at all', async () => {
     await expectRejection(post({ noConditions: true }), 'library_validation_failed');
   });
+
+  // ==========================================================================
+  // H-2 / QA GAP-2 — <Conditions> present but not carrying a real time window
+  // ==========================================================================
+
+  it('H-2 rejects <Conditions> with ZERO attributes, which node-saml ACCEPTS', async () => {
+    // THE bypass. `saml.js:842` is `if (conditions && conditions.$)`, and xml2js
+    // only emits `$` for an element that has attributes — so a bare
+    // `<Conditions>` skips node-saml's ENTIRE timestamp block while the audience
+    // check, which sits outside that guard, still passes. Executed against
+    // node-saml alone: an assertion with `IssueInstant` backdated one year and
+    // this shape AUTHENTICATES. Anyone holding a valid signature could replay it
+    // forever, so REQ-004 was not delivered.
+    await expectRejection(post({ noConditionsAttributes: true }), 'conditions_incomplete');
+  });
+
+  it('H-2 rejects <Conditions> carrying only NotOnOrAfter — no lower bound is still no window', async () => {
+    // Also accepted by node-saml on its own (executed): it validates whichever
+    // of the two attributes are present and does not require both.
+    await expectRejection(post({ noConditionsNotBefore: true }), 'conditions_incomplete');
+  });
+
+  it('H-2 rejects <Conditions> carrying only NotBefore', async () => {
+    // node-saml happens to reject this one first ("Error parsing NotOnOrAfter"),
+    // so end to end it surfaces as the library reason. The direct unit tests
+    // below are what prove OUR guard fires — the guard exists precisely so the
+    // guarantee survives a library refactor.
+    await expectRejection(post({ noConditionsNotOnOrAfter: true }), 'library_validation_failed');
+  });
+
+  /**
+   * QA GAP-2: `conditions_missing` appeared in NO test of any kind, and the
+   * shapes above are partly masked by node-saml. `readVerifiedAssertion` and
+   * `checkConditionsWindow` are therefore exercised directly, on the same xml2js
+   * object shape `profile.getAssertion()` returns.
+   */
+  describe('§B.3.1 <Conditions> guards (direct)', () => {
+    const ctx = (): SamlLogContext => ({
+      ssoConfigId: SSO_CONFIG_ID,
+      teamId: TEAM_ID,
+      correlation: 'none',
+    });
+
+    /** The xml2js shape of a minimal, otherwise-valid assertion. */
+    const assertionWith = (conditions: unknown): Profile =>
+      ({
+        getAssertion: () => ({
+          Assertion: {
+            $: { ID: DEFAULT_ASSERTION_ID },
+            Issuer: [{ _: IDP_ENTITY_ID }],
+            Subject: [
+              {
+                NameID: [{ _: DEFAULT_EMAIL }],
+                SubjectConfirmation: [
+                  { SubjectConfirmationData: [{ $: { Recipient: SP_ACS_URL } }] },
+                ],
+              },
+            ],
+            ...(conditions === undefined ? {} : { Conditions: conditions }),
+          },
+        }),
+      }) as unknown as Profile;
+
+    const win = (notBefore: string, notOnOrAfter: string): VerifiedAssertion =>
+      ({ conditionsNotBefore: notBefore, conditionsNotOnOrAfter: notOnOrAfter }) as VerifiedAssertion;
+
+    it('the baseline shape is READABLE, so the rejections below are about <Conditions>', () => {
+      const ok = readVerifiedAssertion(
+        assertionWith([{ $: { NotBefore: '2026-01-01T00:00:00Z', NotOnOrAfter: '2030-01-01T00:00:00Z' } }]),
+        ctx()
+      );
+      expect(ok.conditionsNotBefore).toBe('2026-01-01T00:00:00Z');
+      expect(ok.conditionsNotOnOrAfter).toBe('2030-01-01T00:00:00Z');
+    });
+
+    it('rejects an ABSENT <Conditions> with conditions_missing', () => {
+      expect(() => readVerifiedAssertion(assertionWith(undefined), ctx())).toThrow(UnauthorizedError);
+      expect(rejectionReason()).toBe('conditions_missing');
+    });
+
+    it('rejects <Conditions> with ZERO attributes (no xml2js `$` key)', () => {
+      expect(() => readVerifiedAssertion(assertionWith([{}]), ctx())).toThrow(UnauthorizedError);
+      expect(rejectionReason()).toBe('conditions_incomplete');
+    });
+
+    it('rejects <Conditions> carrying only NotBefore', () => {
+      expect(() =>
+        readVerifiedAssertion(assertionWith([{ $: { NotBefore: '2026-01-01T00:00:00Z' } }]), ctx())
+      ).toThrow(UnauthorizedError);
+      expect(rejectionReason()).toBe('conditions_incomplete');
+    });
+
+    it('rejects <Conditions> carrying only NotOnOrAfter', () => {
+      expect(() =>
+        readVerifiedAssertion(assertionWith([{ $: { NotOnOrAfter: '2030-01-01T00:00:00Z' } }]), ctx())
+      ).toThrow(UnauthorizedError);
+      expect(rejectionReason()).toBe('conditions_incomplete');
+    });
+
+    it('checkConditionsWindow rejects an expired window, OUTSIDE the 60s skew', () => {
+      expect(() =>
+        checkConditionsWindow(
+          win(new Date(Date.now() - 20 * 60_000).toISOString(), new Date(Date.now() - 10 * 60_000).toISOString()),
+          ctx()
+        )
+      ).toThrow(UnauthorizedError);
+      expect(rejectionReason()).toBe('conditions_expired');
+    });
+
+    it('checkConditionsWindow rejects a not-yet-valid window, OUTSIDE the skew', () => {
+      expect(() =>
+        checkConditionsWindow(
+          win(new Date(Date.now() + 10 * 60_000).toISOString(), new Date(Date.now() + 20 * 60_000).toISOString()),
+          ctx()
+        )
+      ).toThrow(UnauthorizedError);
+      expect(rejectionReason()).toBe('conditions_not_yet_valid');
+    });
+
+    it('checkConditionsWindow ACCEPTS inside the skew at BOTH edges', () => {
+      // Without these the two rejections above would also pass against a check
+      // that rejects everything, and SAML_CLOCK_SKEW_MS would be unproven as a
+      // real bounded window rather than a disabled one.
+      expect(() =>
+        checkConditionsWindow(
+          win(new Date(Date.now() + 30_000).toISOString(), new Date(Date.now() + 300_000).toISOString()),
+          ctx()
+        )
+      ).not.toThrow();
+      expect(() =>
+        checkConditionsWindow(
+          win(new Date(Date.now() - 300_000).toISOString(), new Date(Date.now() - 1_000).toISOString()),
+          ctx()
+        )
+      ).not.toThrow();
+    });
+
+    it('checkConditionsWindow rejects unparseable timestamps rather than passing them', () => {
+      // `Number.isNaN(...) ? accept : compare` is exactly how H-2 would reopen.
+      expect(() => checkConditionsWindow(win('not-a-date', 'not-a-date'), ctx())).toThrow(
+        UnauthorizedError
+      );
+      expect(rejectionReason()).toBe('conditions_incomplete');
+    });
+  });
 });
 
 // ============================================================================
@@ -616,6 +843,29 @@ describe('REQ-006 Recipient and Destination', () => {
 
   it('TEST-007c rejects SubjectConfirmationData carrying NO Recipient (fail closed)', async () => {
     await expectRejection(post({ noRecipient: true }), 'recipient_missing');
+  });
+
+  it('TEST-007d requires EVERY Recipient to match, not merely one of them', async () => {
+    // QA GAP-3. §B.7 states "EVERY `Recipient` present must match, not merely
+    // one of them", but no fixture emitted more than one
+    // <SubjectConfirmationData>, so inverting `.some(r => r !== url)` to
+    // `.every(...)` — turning all-match into any-match, the semantics the spec
+    // explicitly forbids — broke no test. The twin control
+    // `checkSubjectInResponseTo` already had this case; Recipient did not.
+    //
+    // One valid Recipient, one pointing elsewhere. Under `.every` the valid one
+    // satisfies the check and the assertion authenticates.
+    await expectRejection(
+      post({ secondRecipient: 'https://evil.test/acs' }),
+      'recipient_mismatch'
+    );
+  });
+
+  it('TEST-007e ACCEPTS two SubjectConfirmationData that BOTH carry the right Recipient', async () => {
+    // The companion: proves TEST-007d fails on the mismatch and not merely on
+    // the presence of a second confirmation.
+    const result = await processSAMLResponse(post({ secondRecipient: SP_ACS_URL }), SSO_CONFIG_ID);
+    expect(result.user.email).toBe(DEFAULT_EMAIL);
   });
 });
 
@@ -801,6 +1051,25 @@ describe('§B.15 algorithm pinning', () => {
     await expectRejection(toPostBody(xml), 'weak_signature_algorithm');
   });
 
+  it('TEST-013f rejects an rsa-sha1 SIGNATURE over a SHA-256 digest (isolates ALLOWED_SIGNATURE_ALGORITHMS)', async () => {
+    // QA GAP-1. TEST-013a bundles rsa-sha1 with a SHA-1 digest, so the DIGEST
+    // pin kills it and `ALLOWED_SIGNATURE_ALGORITHMS` is never the thing under
+    // test — permitting rsa-sha1, or deleting the SignatureMethod check
+    // outright, broke no test. This is the shape that isolates it, and unlike
+    // every other pin it has no redundant layer: if this allowlist regressed,
+    // nothing else in the pipeline would reject an rsa-sha1 signature over a
+    // strong digest.
+    await expectRejection(
+      toPostBody(
+        signAssertion(buildResponse(), DEFAULT_ASSERTION_ID, {
+          sigAlg: SIG_ALG.rsaSha1,
+          digAlg: DIGEST_ALG.sha256,
+        })
+      ),
+      'weak_signature_algorithm'
+    );
+  });
+
   it('TEST-013e rejects a weak <Response> envelope signature over a strong assertion', async () => {
     // saml.js:562 prefers the Response signature's bytes when present, so
     // assertion-only pinning would miss this entirely.
@@ -813,6 +1082,103 @@ describe('§B.15 algorithm pinning', () => {
       digAlg: DIGEST_ALG.sha1,
     });
     await expectRejection(toPostBody(xml), 'weak_signature_algorithm');
+  });
+});
+
+// ============================================================================
+// H-1 — the pin must describe the algorithms xml-crypto ACTUALLY used
+// ============================================================================
+
+describe('§B.15 / H-1 the pin and the verifier must select the same node', () => {
+  /**
+   * These run `pinAlgorithms` DIRECTLY rather than through
+   * `processSAMLResponse`, and that is deliberate, not a shortcut.
+   *
+   * The divergence is only exploitable in combination with a SHA-1 chosen-prefix
+   * collision (SHAmbles, ~$45k of GPU): the attacker needs a second `SignedInfo`
+   * that collides with the genuine one. Without the collision, xml-crypto
+   * verifies with the DECOY's algorithm and the signature simply fails — so an
+   * end-to-end fixture can only ever show `library_validation_failed`, which
+   * proves nothing about the pin. Calling the pin directly is what shows the
+   * control itself firing, and it is the only honest way to test this without
+   * computing a collision.
+   */
+  const ctx = (): SamlLogContext => ({
+    ssoConfigId: SSO_CONFIG_ID,
+    teamId: TEAM_ID,
+    correlation: 'none',
+  });
+  const domOf = (xml: string): Document => parseResponseDom(xml, ctx());
+
+  it('a clean signed response passes the pin (so the rejections below mean something)', () => {
+    expect(() =>
+      pinAlgorithms(domOf(signAssertion(buildResponse(), DEFAULT_ASSERTION_ID)), ctx())
+    ).not.toThrow();
+  });
+
+  it('rejects a foreign-namespace <SignatureMethod> decoy planted before <ds:SignedInfo>', () => {
+    // xml-crypto resolves the algorithm it VERIFIES WITH via
+    // `.//*[local-name(.)='SignatureMethod']/@Algorithm` — descendant of the
+    // whole signature, namespace-agnostic, document order (signed-xml.js:469).
+    // The decoy sits OUTSIDE <SignedInfo>, so `SignatureValue` does not cover it
+    // and the enveloped-signature transform strips it from the digest: it is
+    // free for an attacker to add to a genuinely signed response. The old pin
+    // read ds:SignedInfo/ds:SignatureMethod and reported rsa-sha256 while
+    // xml-crypto would have verified with rsa-sha1.
+    const xml = withAlgorithmDecoyInSignature(
+      signAssertion(buildResponse(), DEFAULT_ASSERTION_ID),
+      'SignatureMethod',
+      SIG_ALG.rsaSha1
+    );
+    expect(xml).toContain('urn:decoy:test');
+    expect(() => pinAlgorithms(domOf(xml), ctx())).toThrow(UnauthorizedError);
+    expect(rejectionReason()).toBe('signature_algorithm_divergence');
+  });
+
+  it('rejects a foreign-namespace <CanonicalizationMethod> decoy planted before <ds:SignedInfo>', () => {
+    const xml = withAlgorithmDecoyInSignature(
+      signAssertion(buildResponse(), DEFAULT_ASSERTION_ID),
+      'CanonicalizationMethod',
+      C14N.inclusive
+    );
+    expect(() => pinAlgorithms(domOf(xml), ctx())).toThrow(UnauthorizedError);
+    expect(rejectionReason()).toBe('signature_algorithm_divergence');
+  });
+
+  it('rejects even a decoy that names a STRONG algorithm — divergence itself is the defect', () => {
+    // Not "is the value acceptable" but "is there more than one candidate". A
+    // pin that only rejected weak decoys would still be reading a different node
+    // from the one that ran.
+    const xml = withAlgorithmDecoyInSignature(
+      signAssertion(buildResponse(), DEFAULT_ASSERTION_ID),
+      'SignatureMethod',
+      SIG_ALG.rsaSha512
+    );
+    expect(() => pinAlgorithms(domOf(xml), ctx())).toThrow(UnauthorizedError);
+    expect(rejectionReason()).toBe('signature_algorithm_divergence');
+  });
+
+  it('NEW-2 rejects a <Reference> carrying NO <Transforms> instead of skipping the allowlist', () => {
+    // The old loop was `for (const t of elementChildren(reference,'Transforms',DS_NS))`:
+    // zero matches meant the body never ran and the transform allowlist was
+    // silently SKIPPED — "absence => pass", the exact shape §B.4 forbids.
+    const signed = signAssertion(buildResponse(), DEFAULT_ASSERTION_ID);
+    const xml = signed.replace(/<Transforms>[\s\S]*?<\/Transforms>/, '');
+    expect(xml).not.toContain('<Transforms>');
+    expect(() => pinAlgorithms(domOf(xml), ctx())).toThrow(UnauthorizedError);
+    expect(rejectionReason()).toBe('weak_signature_algorithm');
+  });
+
+  it('NEW-2 rejects a foreign-namespace <Transforms> wrapper, which xml-crypto WOULD honour', () => {
+    // `utils.findChildren(refNode,'Transforms')` passes no namespace and
+    // `utils.js:34` treats null as "match any", so xml-crypto honours a
+    // <Transforms> in ANY namespace while our ds-qualified read saw none.
+    const signed = signAssertion(buildResponse(), DEFAULT_ASSERTION_ID);
+    const xml = signed
+      .replace('<Transforms>', '<x:Transforms xmlns:x="urn:decoy:test">')
+      .replace('</Transforms>', '</x:Transforms>');
+    expect(() => pinAlgorithms(domOf(xml), ctx())).toThrow(UnauthorizedError);
+    expect(rejectionReason()).toBe('weak_signature_algorithm');
   });
 });
 
@@ -871,6 +1237,24 @@ describe('REQ-001 / REQ-011 successful authentication', () => {
     expect(row?.status).toBe('completed');
     expect(row?.user_id).toBe('user-1');
     expect(replayStore.has(`${SSO_CONFIG_ID}|${DEFAULT_ASSERTION_ID}`)).toBe(true);
+  });
+
+  it('TEST-011c returns the SP-STORED relay state from the atomic consume (H-7)', async () => {
+    // The ACS route may only compare the posted RelayState against this value,
+    // never redirect to the posted one — so the value has to travel back out of
+    // the same single statement that consumed the row, and it has to be the
+    // row's, not the request body's.
+    sessions = [];
+    const pending = addPendingSession();
+    pending.relay_state = 'https://app.example.test/dashboard';
+
+    const result = await processSAMLResponse(post(), SSO_CONFIG_ID);
+    expect(result.relayState).toBe('https://app.example.test/dashboard');
+  });
+
+  it('TEST-011d returns a null relay state when the SP stored none', async () => {
+    const result = await processSAMLResponse(post(), SSO_CONFIG_ID);
+    expect(result.relayState).toBeNull();
   });
 
   it('TEST-011b auto-provisions an unknown email and adds it to the team', async () => {
@@ -978,6 +1362,7 @@ describe('LOG-001 log hygiene', () => {
     '!ENTITY',
     'etc/passwd',
     'badref',
+    'ATTACKERMARKER',
     DEFAULT_REQUEST_ID,
   ];
 
@@ -997,6 +1382,19 @@ describe('LOG-001 log hygiene', () => {
       // console.error outside pino entirely, so a pino-only spy would report
       // green while the leak occurred.
       toPostBody(`<samlp:Response>${'&badref;'.repeat(30)}</samlp:Response>`),
+      // NEW-1. Every payload above is ERROR-class to xmldom, and node-saml's
+      // strict parse rejects all of those BEFORE xml-crypto is reached — which
+      // is why this suite was green while the channel was open. An unquoted
+      // attribute value is a xmldom *WARNING*, so before the fix this document
+      // survived node-saml, reached xml-crypto's unconfigured DOMParser inside
+      // `checkSignature`, AUTHENTICATED SUCCESSFULLY, and wrote
+      // `[xmldom warning] attribute "ATTACKERMARKER0" missed quot(")!` to
+      // stderr — outside pino, outside every redaction rule in this module.
+      toPostBody(withUnquotedAttributes(signAssertion(buildResponse(), DEFAULT_ASSERTION_ID), 1)),
+      // And it amplified 1:1 with the attacker's chosen count (executed:
+      // 1 / 50 / 400 attributes -> 1 / 50 / 400 stderr writes), bounded only by
+      // the 1 MiB body cap, on an unauthenticated endpoint.
+      toPostBody(withUnquotedAttributes(signAssertion(buildResponse(), DEFAULT_ASSERTION_ID), 50)),
     ];
 
     for (const body of hostileBodies) {
@@ -1051,7 +1449,12 @@ describe('input screening (§B.3.3, §B.9)', () => {
   });
 
   it('rejects a body that is not XML at all', async () => {
-    await expectRejection(toPostBody('not xml at all'), 'library_validation_failed');
+    // Reason TIGHTENED, not relaxed. The well-formedness screen (NEW-1) now runs
+    // BEFORE node-saml, so this is caught by our own root-element check rather
+    // than delegated to the library. `response_root_invalid` is a strictly more
+    // specific assertion than `library_validation_failed`: it names OUR gate,
+    // and it fails if the screen is ever moved back behind node-saml.
+    await expectRejection(toPostBody('not xml at all'), 'response_root_invalid');
   });
 
   it('routes an unusable idp_certificate through the sanitized path (MED-7)', async () => {
@@ -1141,6 +1544,196 @@ describe('§B.8.5 request binding (direct)', () => {
 });
 
 // ============================================================================
+// H-6 / M-5 — reject reasons that were DECLARED but never asserted
+// ============================================================================
+
+describe('H-6 declared reject reasons are exercised', () => {
+  const ctx = (): SamlLogContext => ({
+    ssoConfigId: SSO_CONFIG_ID,
+    teamId: TEAM_ID,
+    correlation: 'none',
+  });
+
+  it('session_not_consumed fires when the atomic consume matches zero rows', async () => {
+    // This guard is the compensation for the TOCTOU that
+    // `sso-session-cache.ts:11-16` documents in node-saml ("never inspects
+    // removeAsync's return value"; "a reachable path where removeAsync is not
+    // called at all"). Both tests named for the session gate asserted
+    // `library_validation_failed` — i.e. node-saml rejecting first — so the
+    // compensation itself had zero coverage.
+    //
+    // The zero-row consume is exactly what the LOSER of two concurrent POSTs
+    // observes: the `WHERE status = 'pending'` predicate is re-evaluated under
+    // READ COMMITTED and matches nothing. Reached on the library-ACCEPTED path
+    // (an assertion whose SubjectConfirmationData carries no @InResponseTo never
+    // causes node-saml to call removeAsync itself).
+    consumeMatchesZeroRows = true;
+    await expectRejection(post({ noScdInResponseTo: true }), 'session_not_consumed');
+  });
+
+  it('assertion_id_invalid fires for an over-length Assertion/@ID', async () => {
+    // Executed against node-saml: a 701-character `Assertion/@ID` is ACCEPTED,
+    // so this cap is the only bound before the value reaches the replay table.
+    const longId = `_${'a'.repeat(700)}`;
+    await expectRejection(
+      toPostBody(signAssertion(buildResponse({ assertionId: longId }), longId)),
+      'assertion_id_invalid'
+    );
+  });
+
+  it('assertion_id_missing fires when the assertion carries no ID', () => {
+    const profile = {
+      getAssertion: () => ({
+        Assertion: {
+          Issuer: [{ _: IDP_ENTITY_ID }],
+          Subject: [{ NameID: [{ _: DEFAULT_EMAIL }] }],
+          Conditions: [{ $: { NotBefore: '2026-01-01T00:00:00Z', NotOnOrAfter: '2030-01-01T00:00:00Z' } }],
+        },
+      }),
+    } as unknown as Profile;
+    expect(() => readVerifiedAssertion(profile, ctx())).toThrow(UnauthorizedError);
+    expect(rejectionReason()).toBe('assertion_id_missing');
+  });
+
+  it('assertion_unreadable fires when the profile yields no Assertion object', () => {
+    expect(() =>
+      readVerifiedAssertion({ getAssertion: () => ({}) } as unknown as Profile, ctx())
+    ).toThrow(UnauthorizedError);
+    expect(rejectionReason()).toBe('assertion_unreadable');
+
+    // The other shape: no `getAssertion` at all, which is what a future library
+    // version dropping the method would produce.
+    expect(() => readVerifiedAssertion({} as unknown as Profile, ctx())).toThrow(UnauthorizedError);
+    expect(rejectionReason()).toBe('assertion_unreadable');
+  });
+
+  it('user_provisioning_failed keeps a raw pg error out of the response (NEW-3)', async () => {
+    // `INSERT INTO users` sat outside every try/catch. A unique violation on
+    // `users.email` — two concurrent first-time SSO logins for one address, or a
+    // race against self-registration — threw a raw `pg` error out of
+    // `processSAMLResponse`; not an AppError, so `errorHandler.ts:84` echoes
+    // `err.message` to the client in dev.
+    userInsertThrows = true;
+    await expect(
+      processSAMLResponse(post({ email: 'bob@example.test', nameId: 'bob@example.test' }), SSO_CONFIG_ID)
+    ).rejects.toThrow(UnauthorizedError);
+    expect(rejectionReason()).toBe('user_provisioning_failed');
+    expect(generateTokens).not.toHaveBeenCalled();
+    // And the client message stays the constant — no schema detail leaks.
+    await expect(
+      processSAMLResponse(post({ email: 'bob@example.test', nameId: 'bob@example.test' }), SSO_CONFIG_ID)
+    ).rejects.toThrow(SAML_GENERIC_FAILURE);
+  });
+
+  it('a promotion that matches zero rows still authenticates, but is RECORDED (NEW-3 / L-1)', async () => {
+    // `promoteSessionToCompleted` discarded its result, so a lost promotion
+    // silently under-counted successful logins in the table that IS the SSO
+    // evidence source. It must not fail the login — every gate has passed — but
+    // it must not be silent either.
+    promotionMatchesZeroRows = true;
+    const result = await processSAMLResponse(post(), SSO_CONFIG_ID);
+    expect(result.user.email).toBe(DEFAULT_EMAIL);
+    expect(loggerCalls.some((c) => rejectionReasonOf(c) === 'session_promotion_missed')).toBe(true);
+  });
+
+  it('email_missing: the invariant it depends on is pinned', async () => {
+    // `email_missing` is a defence-in-depth backstop in `resolveSSOUser` and is
+    // UNREACHABLE by construction, proved by execution rather than asserted:
+    // xml2js maps empty and whitespace-only element content to the plain string
+    // '' (not `{ _: '' }`), `textOf` drops anything that is not a record, and
+    // `readAttributes` skips an attribute once every value has been dropped. So
+    // the mapped email attribute can never hold an empty value to override the
+    // already-non-empty <NameID> with.
+    //
+    // Deleting the guard would be the wrong trade — it is the thing that fails
+    // closed the day that parse behaviour changes — so the INVARIANT is pinned
+    // here instead. If xml2js ever starts surfacing empty values, this goes red
+    // and the guard becomes reachable.
+    const result = await processSAMLResponse(
+      post({
+        extraAttributes:
+          '<saml:Attribute Name="blank"><saml:AttributeValue></saml:AttributeValue>' +
+          '<saml:AttributeValue> </saml:AttributeValue></saml:Attribute>',
+      }),
+      SSO_CONFIG_ID
+    );
+    expect(result.user.email).toBe(DEFAULT_EMAIL);
+
+    const store = new Map<string, string>([[DEFAULT_REQUEST_ID, new Date().toISOString()]]);
+    const saml = new SAML({
+      callbackUrl: SP_ACS_URL,
+      issuer: SP_ENTITY_ID,
+      idpCert: IDP_PUBLIC_KEY_PEM,
+      audience: SP_ENTITY_ID,
+      wantAssertionsSigned: true,
+      wantAuthnResponseSigned: false,
+      validateInResponseTo: ValidateInResponseTo.always,
+      requestIdExpirationPeriodMs: 600_000,
+      acceptedClockSkewMs: 60_000,
+      cacheProvider: {
+        saveAsync: async (k: string, val: string) => {
+          store.set(k, val);
+          return { value: val, createdAt: Date.now() };
+        },
+        getAsync: async (k: string) => store.get(k) ?? null,
+        removeAsync: async (k: string | null) => (k !== null && store.delete(k) ? k : null),
+      } as never,
+    });
+    const xml = signAssertion(
+      buildResponse({
+        extraAttributes:
+          '<saml:Attribute Name="blank"><saml:AttributeValue></saml:AttributeValue></saml:Attribute>',
+      }),
+      DEFAULT_ASSERTION_ID
+    );
+    const { profile } = await saml.validatePostResponseAsync({ SAMLResponse: toPostBody(xml) });
+    const read = readVerifiedAssertion(profile as Profile, ctx());
+    // The empty attribute is DROPPED, not stored as ''.
+    expect(read.attributes.has('blank')).toBe(false);
+    // And the value the guard defends is already required non-empty.
+    expect(read.nameId.length).toBeGreaterThan(0);
+  });
+});
+
+// ============================================================================
+// H-5 — single-use is an OUTCOME, not a matched SQL substring
+// ============================================================================
+
+describe('H-5 the atomic consume is single-use', () => {
+  it('a second consume of the same request id yields nothing', async () => {
+    // The only atomicity test asserted on the SOURCE TEXT of the emitted
+    // template (`s.includes("SET status = 'failed'")`, `toContain('RETURNING
+    // id')`), which holds for an implementation whose `WHERE status = 'pending'`
+    // predicate has been deleted. This asserts the OUTCOME instead.
+    //
+    // Scope, stated plainly: this is the mock's model of the predicate, not a
+    // concurrency proof. The concurrency claim itself
+    // (`sso-session-cache.ts:118-121`, READ COMMITTED EvalPlanQual) was verified
+    // by CISO against a real PostgreSQL at 25 rounds x 20-way concurrency —
+    // 25 winners for 25 rounds on both the consume and the assertion-ID claim.
+    // That, not this test, is the evidence for atomicity under contention.
+    const provider = new SsoSessionCacheProvider(SSO_CONFIG_ID);
+
+    expect(await provider.removeAsync(DEFAULT_REQUEST_ID)).toBe(DEFAULT_REQUEST_ID);
+    expect(provider.consumedSessionId).not.toBeNull();
+
+    const second = new SsoSessionCacheProvider(SSO_CONFIG_ID);
+    expect(await second.removeAsync(DEFAULT_REQUEST_ID)).toBeNull();
+    expect(second.consumedSessionId).toBeNull();
+    expect(second.consumedRequestId).toBeNull();
+  });
+
+  it('a consumed row cannot be re-consumed by replaying the whole POST', async () => {
+    const body = post();
+    await processSAMLResponse(body, SSO_CONFIG_ID);
+    expect(sessions.find((s) => s.request_id === DEFAULT_REQUEST_ID)?.status).toBe('completed');
+
+    await expect(processSAMLResponse(body, SSO_CONFIG_ID)).rejects.toThrow(UnauthorizedError);
+    expect(generateTokens).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ============================================================================
 // LOG-001 supplement — the silencing errorHandler must be load-bearing
 // ============================================================================
 
@@ -1159,15 +1752,72 @@ describe('LOG-001 the DOMParser errorHandler is what suppresses xmldom', () => {
     const defaultCalls = consoleErrorSpy.mock.calls.length;
     consoleErrorSpy.mockClear();
 
-    // The same body through the silenced parser. It does NOT reject here — the
-    // root element really is <samlp:Response>, only its content is malformed —
-    // which is precisely why the error channel, not the return value, is what
-    // has to be closed.
-    parseResponseDom(bad, { ssoConfigId: SSO_CONFIG_ID, teamId: TEAM_ID, correlation: 'none' });
+    // The same body through our parser. It writes NOTHING, and it now also
+    // REJECTS: the root element really is <samlp:Response> and only its content
+    // is malformed, so before NEW-1 this returned a partial document and the
+    // request continued into node-saml and then into xml-crypto. Silencing our
+    // own channel was never enough — the parser we do not own has its own.
+    expect(() =>
+      parseResponseDom(bad, { ssoConfigId: SSO_CONFIG_ID, teamId: TEAM_ID, correlation: 'none' })
+    ).toThrow(UnauthorizedError);
+    expect(rejectionReason()).toBe('response_not_wellformed');
     const silencedCalls = consoleErrorSpy.mock.calls.length;
 
     expect(defaultCalls).toBeGreaterThanOrEqual(30);
     expect(silencedCalls).toBe(0);
+  });
+
+  it('NEW-1 a WARNING-class document is rejected before node-saml, so xml-crypto never parses it', async () => {
+    // The screen has to fire on warnings, not only on errors. Parity was
+    // measured, not assumed: for each of these bodies the count our
+    // record-and-reject handler observes equals the number of console writes
+    // xmldom's DEFAULT handler produces — 1/1, 3/3, 2/2 — which is what makes
+    // "our parser saw it" equivalent to "xml-crypto would have printed it".
+    const signed = signAssertion(buildResponse(), DEFAULT_ASSERTION_ID);
+
+    for (const count of [1, 50]) {
+      sessions = [];
+      addPendingSession();
+      const body = toPostBody(withUnquotedAttributes(signed, count));
+      await expect(processSAMLResponse(body, SSO_CONFIG_ID)).rejects.toThrow(UnauthorizedError);
+      // Rejected by OUR screen — not by node-saml, which accepts this document,
+      // and not by any later gate.
+      expect(rejectionReason()).toBe('response_not_wellformed');
+      expect(generateTokens).not.toHaveBeenCalled();
+    }
+
+    // Zero writes on every console channel, for the payload that used to produce
+    // exactly `count` of them.
+    expect(consoleWarnSpy).not.toHaveBeenCalled();
+    expect(consoleErrorSpy).not.toHaveBeenCalled();
+    expect(consoleLogSpy).not.toHaveBeenCalled();
+    expect(stderrSpy).not.toHaveBeenCalled();
+  });
+
+  it('NEW-1 the unmodified document still authenticates, so the screen is not rejecting everything', async () => {
+    const result = await processSAMLResponse(
+      toPostBody(signAssertion(buildResponse(), DEFAULT_ASSERTION_ID)),
+      SSO_CONFIG_ID
+    );
+    expect(result.user.email).toBe(DEFAULT_EMAIL);
+  });
+
+  it('NEW-1 the screen records WARNING-class input, which the old no-op handler could not', () => {
+    // The previous handler was `() => {}`: it silenced OUR parser and returned a
+    // partial document, so a warning-class body sailed on to node-saml and then
+    // to xml-crypto. Silencing is not screening.
+    const warningClass = '<samlp:Response xmlns:samlp="urn:x"><junk ATTACKERMARKER0=UNQUOTED/></samlp:Response>';
+    expect(() =>
+      parseResponseDom(warningClass, {
+        ssoConfigId: SSO_CONFIG_ID,
+        teamId: TEAM_ID,
+        correlation: 'none',
+      })
+    ).toThrow(UnauthorizedError);
+    expect(rejectionReason()).toBe('response_not_wellformed');
+    // And nothing about the attacker's marker reached any channel on the way.
+    expect(consoleWarnSpy).not.toHaveBeenCalled();
+    expect(consoleErrorSpy).not.toHaveBeenCalled();
   });
 
   it('rejects a parsed document whose root element is not <Response>', () => {

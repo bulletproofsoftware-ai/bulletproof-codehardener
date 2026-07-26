@@ -20,6 +20,7 @@ import {
 } from './sso-session-cache.js';
 import {
   assertionReplayExpiry,
+  checkConditionsWindow,
   checkDestination,
   checkIssuer,
   checkRecipient,
@@ -333,7 +334,16 @@ export async function initiateSAMLLogin(
 export async function processSAMLResponse(
   samlResponse: string,
   ssoConfigId: string
-): Promise<{ user: UserData; tokens: AuthTokens; isNewUser: boolean }> {
+): Promise<{
+  user: UserData;
+  tokens: AuthTokens;
+  isNewUser: boolean;
+  /**
+   * The `relay_state` THIS SP stored when it issued the AuthnRequest — never
+   * the `RelayState` field of the POST body. See H-7 and the ACS route.
+   */
+  relayState: string | null;
+}> {
   const ctx: SamlLogContext = { ssoConfigId, teamId: null, correlation: 'none' };
 
   if (!ssoEnabled) rejectSaml('sso_disabled', ctx);
@@ -347,15 +357,20 @@ export async function processSAMLResponse(
   // the body. Bounds XML-parser CPU and memory on unauthenticated input.
   const responseXml = decodeAndScreenResponse(samlResponse, ctx);
 
+  // Step 0 — strict well-formedness screen. This MUST precede node-saml: it is
+  // what stops a warning-class document (an unquoted attribute value, say) from
+  // reaching `xml-crypto`'s unconfigured xmldom parser, which writes
+  // attacker-chosen text to `console.warn` on an unauthenticated endpoint. No
+  // value from this document informs any decision until after Step 1, so this
+  // does not read unverified data — see `parseResponseDom`. The same parse then
+  // serves the advisory Destination check and both algorithm pins.
+  const doc = parseResponseDom(responseXml, ctx);
+
   const { saml, provider } = createSamlValidator(config, ctx);
 
   // Step 1 — signature verification. Everything after this point reads only
   // bytes that the pinned IdP certificate actually covered.
   const profile = await validateSignedResponse(saml, samlResponse, ctx);
-
-  // One parse of the raw response serves the advisory Destination check and
-  // both algorithm pins.
-  const doc = parseResponseDom(responseXml, ctx);
 
   // Step 2 — algorithm pinning, after validation and before any identity
   // decision. Covers the assertion signature AND the envelope signature when
@@ -366,6 +381,9 @@ export async function processSAMLResponse(
   const assertion = readVerifiedAssertion(profile, ctx);
   ctx.correlation = correlationOf(assertion.subjectInResponseTo[0] ?? null);
   checkIssuer(assertion, config, ctx);
+  // Our own assertion-lifetime enforcement. node-saml skips its entire
+  // timestamp block for a `<Conditions>` element with no attributes.
+  checkConditionsWindow(assertion, ctx);
   checkRecipient(assertion, config, ctx);
   checkDestination(doc, config, ctx);
 
@@ -401,7 +419,16 @@ export async function processSAMLResponse(
 
   // Step 8 — promote the session. The last DB write, reached only on full
   // success, so 'completed' keeps meaning "a user actually logged in".
-  await promoteSessionToCompleted(sessionId, user.id);
+  const promoted = await promoteSessionToCompleted(sessionId, user.id);
+  if (!promoted) {
+    // Not a rejection: every security gate has already passed and the user is
+    // authenticated. It IS an audit-integrity event — `sso_sessions` will
+    // under-count this successful login — so it must not pass silently.
+    logger.warn(
+      { ssoConfigId, teamId: config.teamId, reason: 'session_promotion_missed' },
+      'SSO session promotion matched no row'
+    );
+  }
 
   const tokens = generateTokens(user.id, user.email);
 
@@ -409,7 +436,7 @@ export async function processSAMLResponse(
 
   void maybeCleanupExpiredAssertionIds();
 
-  return { user, tokens, isNewUser };
+  return { user, tokens, isNewUser, relayState: provider.consumedRelayState };
 }
 
 /**
@@ -427,8 +454,8 @@ function toSAMLAssertion(
     attributes: assertion.attributes,
     issuer: assertion.issuer,
     inResponseTo: consumedRequestId,
-    notBefore: assertion.conditionsNotBefore ?? undefined,
-    notOnOrAfter: assertion.conditionsNotOnOrAfter ?? undefined,
+    notBefore: assertion.conditionsNotBefore,
+    notOnOrAfter: assertion.conditionsNotOnOrAfter,
   };
 }
 
@@ -513,11 +540,24 @@ async function resolveSSOUser(
 
   if (!config.autoProvisionUsers) rejectSaml('user_not_provisionable', ctx);
 
-  const createResult = await db.execute(
-    sql`INSERT INTO users (email, name, email_verified, sso_provider, sso_subject_id)
-        VALUES (${emailLower}, ${name}, true, 'saml', ${assertion.nameId})
-        RETURNING id, email, name, created_at`
-  );
+  // NEW-3 — this INSERT sits on an unauthenticated path and can fail for a
+  // reason that is not an AppError: two concurrent first-time SSO logins for the
+  // same address, or a race against self-registration, both raise a unique
+  // violation on `users.email`. `errorHandler.ts:84` echoes `err.message` for
+  // non-AppError throws in dev, so a raw `pg` error here is a schema-disclosure
+  // channel. The catch is bare — no binding — so there is no error variable in
+  // scope for a later edit to log or rethrow.
+  let createResult;
+  try {
+    createResult = await db.execute(
+      sql`INSERT INTO users (email, name, email_verified, sso_provider, sso_subject_id)
+          VALUES (${emailLower}, ${name}, true, 'saml', ${assertion.nameId})
+          RETURNING id, email, name, created_at`
+    );
+  } catch {
+    rejectSaml('user_provisioning_failed', ctx);
+  }
+  if (createResult.rows.length === 0) rejectSaml('user_provisioning_failed', ctx);
   const created = createResult.rows[0] as unknown as UserRow;
 
   if (config.autoAddToTeam) {

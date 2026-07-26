@@ -32,6 +32,7 @@ export interface SsoRequestMeta {
 
 interface SessionIdRow {
   id: string;
+  relay_state: string | null;
 }
 
 interface SessionCreatedRow {
@@ -57,6 +58,15 @@ export class SsoSessionCacheProvider implements CacheProvider {
    * consumed, not against the attacker-mutable `Response/@InResponseTo`.
    */
   public consumedRequestId: string | null = null;
+
+  /**
+   * The `relay_state` this SP stored when it issued the AuthnRequest, returned
+   * by the same atomic consume. H-7: the `RelayState` echoed back on the ACS
+   * POST is unsigned attacker-controlled input and decides where the minted
+   * access token is delivered, so the posted value may only ever be COMPARED
+   * against this one — never used in its place.
+   */
+  public consumedRelayState: string | null = null;
 
   /**
    * @param ssoConfigId tenant scope for EVERY statement in this class.
@@ -136,13 +146,15 @@ export class SsoSessionCacheProvider implements CacheProvider {
           WHERE request_id = ${key} AND sso_config_id = ${this.ssoConfigId}
             AND status = 'pending'
             AND created_at > NOW() - INTERVAL '10 minutes'
-          RETURNING id`
+          RETURNING id, relay_state`
     );
 
     if (result.rows.length === 0) return null;
 
-    this.consumedSessionId = (result.rows[0] as unknown as SessionIdRow).id;
+    const row = result.rows[0] as unknown as SessionIdRow;
+    this.consumedSessionId = row.id;
     this.consumedRequestId = key;
+    this.consumedRelayState = row.relay_state ?? null;
     return key;
   }
 }
@@ -155,11 +167,16 @@ export class SsoSessionCacheProvider implements CacheProvider {
 export async function promoteSessionToCompleted(
   sessionId: string,
   userId: string
-): Promise<void> {
-  await db.execute(
+): Promise<boolean> {
+  const result = await db.execute(
     sql`UPDATE sso_sessions
         SET status = 'completed', user_id = ${userId}, completed_at = NOW(), updated_at = NOW()
         WHERE id = ${sessionId} AND status = 'failed'
         RETURNING id`
   );
+  // NEW-3 — the caller mints a JWT regardless, by design (a lost promotion must
+  // not fail a login that has already passed every security gate). Returning the
+  // outcome is what lets the caller record that `sso_sessions` under-counted,
+  // instead of the audit trail drifting silently.
+  return result.rows.length > 0;
 }
