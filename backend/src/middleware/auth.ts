@@ -128,7 +128,11 @@ export const authenticate = async (
       // is_active is also filtered here: it was never consulted, so a revoked
       // key continued to authenticate for as long as it had not expired.
       const result = await db.execute(
-        sql`SELECT ak.id, ak.user_id, ak.scopes, ak.key_hash, ak.expires_at
+        // The column is `permissions` (postgres/init.sql), not `scopes`.
+        // Selecting ak.scopes threw, the catch below turned it into
+        // "Authentication failed", and NO api key could ever authenticate.
+        // Aliased so the rest of this file keeps its `scopes` naming.
+        sql`SELECT ak.id, ak.user_id, ak.permissions AS scopes, ak.key_hash, ak.expires_at
             FROM api_keys ak
             WHERE ak.key_prefix = ${keyPrefix}
             AND ak.is_active = true

@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 import { db } from '../db/client.js';
 import { sql } from 'drizzle-orm';
 import { createLogger } from '../utils/logger.js';
+import { assertPublicUrl } from '../utils/ssrfGuard.js';
 import { apiSuccess, apiError } from '../utils/apiResponse.js';
 import { queueWebhookRetry } from '../services/queue/webhook.queue.js';
 
@@ -436,6 +437,16 @@ export async function testWebhook(req: Request, res: Response) {
     .createHmac('sha256', webhook.secret)
     .update(JSON.stringify(payload))
     .digest('hex');
+
+  // webhook.url is user-registered, so it must be checked before the server
+  // fetches it — otherwise this endpoint proxies requests into the private
+  // network (container services, admin ports, cloud metadata).
+  try {
+    await assertPublicUrl(webhook.url);
+  } catch (err) {
+    logger.warn({ webhookId: id, userId, url: webhook.url }, 'Webhook test blocked by SSRF guard');
+    return apiError(res, err instanceof Error ? err.message : 'Blocked webhook URL', 400);
+  }
 
   try {
     const response = await fetch(webhook.url, {

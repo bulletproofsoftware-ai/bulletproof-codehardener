@@ -138,6 +138,28 @@ export const corsOrigins = env.CORS_ORIGIN.split(',').map(o => o.trim());
 
 export const isDev = env.NODE_ENV === 'development';
 export const isProd = env.NODE_ENV === 'production';
+
+// Refuse to run in production with the development placeholder credentials.
+// Both defaults are published in this repository, so a deployment that forgot
+// to set them accepts tokens anyone can forge and an internal API key anyone
+// can read. Fail at startup rather than serve with a known secret.
+const DEV_PLACEHOLDER_SECRETS: Array<[string, string]> = [
+  ['JWT_SECRET', 'dev-secret-change-in-production'],
+  ['INTERNAL_API_KEY', 'dev-internal-key-change-in-production'],
+];
+
+if (isProd) {
+  const unset = DEV_PLACEHOLDER_SECRETS
+    .filter(([name, placeholder]) => (env as Record<string, unknown>)[name] === placeholder)
+    .map(([name]) => name);
+  if (unset.length > 0) {
+    console.error(
+      `[FATAL] ${unset.join(', ')} still set to the development placeholder. ` +
+      'These values are published in the repository; set real secrets before running in production.'
+    );
+    process.exit(1);
+  }
+}
 export const isTest = env.NODE_ENV === 'test';
 
 export const stripeEnabled = !!env.STRIPE_SECRET_KEY;
