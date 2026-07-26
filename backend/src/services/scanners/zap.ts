@@ -26,6 +26,24 @@ function shQuote(value: string): string {
   return `'${String(value).replace(/'/g, "'\\''")}'`;
 }
 
+/**
+ * Escape a value for embedding inside ZAP's own `-config key="value"` syntax.
+ *
+ * The whole `-z` string is re-parsed by ZAP: zap_common.add_zap_options() runs
+ * `shlex.split(zap_options)` and appends every resulting token to ZAP's argv.
+ * shlex is POSIX-quoting-aware, so inside a double-quoted word a backslash is
+ * an escape character too — escaping only `"` left the backslash live. A
+ * password of `x\" -config script.scriptsDir=/tmp/evil -newsession /tmp/pwned \`
+ * became `x\\"` to shlex: a literal backslash followed by a *closing* quote, so
+ * everything after it was parsed as standalone ZAP command-line arguments. The
+ * shQuote() around the `-z` argument stops the shell seeing any of this, but not
+ * ZAP's own re-parse. Escaping the backslash first closes that
+ * (CodeQL js/incomplete-sanitization).
+ */
+function zapConfigQuote(value: string): string {
+  return String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
 const logger = createLogger('scanner-zap');
 
 const ZAP_HOME = '/app/tools/ZAP_2.16.0';
@@ -159,13 +177,13 @@ export async function runZAP(jobData: ScanJobData): Promise<ScannerResult> {
     // Build ZAP form-handler auth flags when auth config is available
     let authZFlags = '';
     if (hasAuth) {
-      // Only the double quote is escaped here because these values sit inside
-      // ZAP's own -config "value" syntax; the whole -z argument is shQuote'd
-      // before it reaches the shell, so shell metacharacters cannot escape.
-      const usernameField = authConfig.usernameField.replace(/"/g, '\\"');
-      const passwordField = authConfig.passwordField.replace(/"/g, '\\"');
-      const username = authConfig.username.replace(/"/g, '\\"');
-      const password = authConfig.password.replace(/"/g, '\\"');
+      // These values sit inside ZAP's own -config "value" syntax, which ZAP
+      // re-parses with shlex.split — see zapConfigQuote() for why the backslash
+      // has to be escaped before the quote.
+      const usernameField = zapConfigQuote(authConfig.usernameField);
+      const passwordField = zapConfigQuote(authConfig.passwordField);
+      const username = zapConfigQuote(authConfig.username);
+      const password = zapConfigQuote(authConfig.password);
       authZFlags = [
         `-config formhandler.fields.field(0).fieldName="${usernameField}"`,
         `-config formhandler.fields.field(0).value="${username}"`,
@@ -378,7 +396,12 @@ function buildZapAuthContext(
   const username = esc(auth.username);
   const password = esc(auth.password);
   const successIndicator = esc(auth.successIndicator);
-  const targetHost = esc(new URL(targetUrl).hostname.replace(/\./g, '\\.'));
+  // <incregexes> is a regex, so every metacharacter has to be escaped, not just
+  // the dot. A hostname can legitimately carry `*`, `$`, `(`, `)` and — for IPv6
+  // literals — the `[` `]` that would otherwise open a character class and make
+  // the scope pattern silently match the wrong hosts or fail to compile
+  // (CodeQL js/incomplete-sanitization).
+  const targetHost = esc(new URL(targetUrl).hostname.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
 
   return `<?xml version="1.0" encoding="UTF-8" standalone="no"?>
 <configuration>
