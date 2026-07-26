@@ -257,7 +257,7 @@ export async function runZAP(jobData: ScanJobData): Promise<ScannerResult> {
         scanMode = 'quick-fallback';
         logger.warn('ZAP daemon failed to start, falling back to quick scan');
         await execAsync(
-          `timeout 300 ${ZAP_HOME}/zap.sh -cmd -quickurl ${targetUrl} -quickout ${outputFile} -quickprogress -config api.disablekey=true 2>/dev/null; true`,
+          `timeout 300 ${shQuote(`${ZAP_HOME}/zap.sh`)} -cmd -quickurl ${shQuote(targetUrl)} -quickout ${shQuote(outputFile)} -quickprogress -config api.disablekey=true 2>/dev/null; true`,
           { maxBuffer: 50 * 1024 * 1024, timeout: 330000 }
         );
       } else {
