@@ -74,9 +74,18 @@ vi.mock('../auth.service.js', () => ({
   generateTokens: (...a: unknown[]) => generateTokens(...(a as [])),
 }));
 
-import { processSAMLResponse, initiateSAMLLogin } from './saml.service.js';
-import { SAML_GENERIC_FAILURE } from './saml-validator.js';
+import { processSAMLResponse, initiateSAMLLogin, type SSOConfig } from './saml.service.js';
+import {
+  SAML_GENERIC_FAILURE,
+  SAML_MAX_RESPONSE_BYTES,
+  checkSubjectInResponseTo,
+  parseResponseDom,
+  type SamlLogContext,
+  type VerifiedAssertion,
+} from './saml-validator.js';
 import { UnauthorizedError } from '../../middleware/errorHandler.js';
+import { SAML, ValidateInResponseTo } from '@node-saml/node-saml';
+import { DOMParser } from '@xmldom/xmldom';
 import {
   ATTACKER_PRIVATE_KEY_PEM,
   C14N,
@@ -84,6 +93,7 @@ import {
   DEFAULT_EMAIL,
   DEFAULT_REQUEST_ID,
   DIGEST_ALG,
+  DOCTYPE_CASINGS,
   IDP_ENTITY_ID,
   IDP_PUBLIC_KEY_PEM,
   SIG_ALG,
@@ -93,8 +103,15 @@ import {
   TEAM_ID,
   buildResponse,
   decoySignature,
+  malformedEntityBody,
   signAssertion,
   toPostBody,
+  withDoctype,
+  xswAdviceNested,
+  xswDoubleSignature,
+  xswDuplicateIdInExtensions,
+  xswRelocatedSignature,
+  xswSiblingAssertion,
   type ResponseOverrides,
 } from './__fixtures__/saml-fixtures.js';
 
@@ -109,6 +126,16 @@ interface SessionRow {
   status: string;
   created_at: Date;
   user_id: string | null;
+  /**
+   * node-saml's CacheProvider interface is `saveAsync(key, value)` — two
+   * strings, with no room for these. They travel on the provider's constructor
+   * instead (§B.8.2), and they are modelled here so REQ-011 can assert the SSO
+   * audit trail actually survived the move behind that interface rather than
+   * being silently dropped.
+   */
+  relay_state: string | null;
+  ip_address: string | null;
+  user_agent: string | null;
 }
 
 interface UserRecord {
@@ -126,7 +153,7 @@ let replayStore: Set<string> = new Set();
 let users: UserRecord[] = [];
 let teamMembers: { team_id: string; user_id: string }[] = [];
 let executed: string[] = [];
-let configRow: Record<string, unknown>;
+let configRow: Record<string, unknown> | null;
 let sessionSeq = 0;
 let userSeq = 0;
 
@@ -162,6 +189,9 @@ function addPendingSession(requestId = DEFAULT_REQUEST_ID): SessionRow {
     status: 'pending',
     created_at: new Date(),
     user_id: null,
+    relay_state: null,
+    ip_address: null,
+    user_agent: null,
   };
   // The partial unique index: at most one PENDING row per (config, request_id).
   const clash = sessions.find(
@@ -186,6 +216,10 @@ function installDbMock(): void {
 
     if (s.includes('INSERT INTO sso_sessions')) {
       const row = addPendingSession(v[1] as string);
+      // REQ-011: all three audit columns must still be written.
+      row.relay_state = (v[2] as string | null) ?? null;
+      row.ip_address = (v[3] as string | null) ?? null;
+      row.user_agent = (v[4] as string | null) ?? null;
       return { rows: [{ id: row.id, created_at: row.created_at }], rowCount: 1 };
     }
 
@@ -396,14 +430,91 @@ describe('REQ-002 signature wrapping', () => {
   });
 
   it('TEST-003b rejects a signature relocated away from its referenced parent', async () => {
-    // Sign the assertion, then move the whole assertion body under <Advice>, so
-    // the signature no longer envelopes the node it references.
-    const signed = signAssertion(buildResponse({ adviceWrapped: true }), DEFAULT_ASSERTION_ID);
-    const xml = signed.replace('<saml:Advice>', '<saml:Advice><saml:Wrapper>').replace(
-      '</saml:Advice>',
-      '</saml:Wrapper></saml:Advice>'
-    );
+    // Relocate the INTACT signature to be a direct child of <Response> while its
+    // Reference/@URI still names the assertion. The signed byte range is
+    // untouched, so this is a genuine relocation rather than tampering that any
+    // digest check would catch — it is specifically the enveloped-only guard
+    // (xml.js:93) that must fire. Asserted by message below.
+    await expectRejection(toPostBody(xswRelocatedSignature()), 'library_validation_failed');
+  });
+
+  it('TEST-003d rejects the genuinely signed assertion buried in <saml:Advice>', async () => {
+    // An unsigned attacker assertion sits at the normal position; the real signed
+    // one is nested inside its <Advice>. node-saml only searches direct children
+    // of assertions[0], so the real signature is never found.
+    const xml = xswAdviceNested();
+    expect(xml).toContain('admin@example.test');
     await expectRejection(toPostBody(xml), 'library_validation_failed');
+  });
+
+  it('TEST-003e rejects an assertion carrying two signatures', async () => {
+    await expectRejection(toPostBody(xswDoubleSignature()), 'library_validation_failed');
+  });
+
+  /**
+   * The service deliberately discards node-saml's error text (§B.9 r4), so all
+   * five shapes are indistinguishable through `processSAMLResponse` — which is
+   * the required behaviour, but it means the tests above cannot show that FIVE
+   * different guards are doing the work rather than one. §B.3 requires the
+   * guards be asserted individually so a regression in any single one is caught,
+   * so that is done here, directly against the library.
+   */
+  describe('the five wrapping shapes trip FIVE distinct node-saml guards', () => {
+    const rawValidate = async (xml: string): Promise<string> => {
+      const store = new Map<string, string>([[DEFAULT_REQUEST_ID, new Date().toISOString()]]);
+      const saml = new SAML({
+        callbackUrl: SP_ACS_URL,
+        issuer: SP_ENTITY_ID,
+        idpCert: IDP_PUBLIC_KEY_PEM,
+        idpIssuer: IDP_ENTITY_ID,
+        audience: SP_ENTITY_ID,
+        wantAssertionsSigned: true,
+        wantAuthnResponseSigned: false,
+        validateInResponseTo: ValidateInResponseTo.always,
+        requestIdExpirationPeriodMs: 600_000,
+        acceptedClockSkewMs: 60_000,
+        cacheProvider: {
+          saveAsync: async (k: string, val: string) => {
+            store.set(k, val);
+            return { value: val, createdAt: Date.now() };
+          },
+          getAsync: async (k: string) => store.get(k) ?? null,
+          removeAsync: async (k: string | null) => (k !== null && store.delete(k) ? k : null),
+        } as never,
+      });
+      try {
+        await saml.validatePostResponseAsync({ SAMLResponse: toPostBody(xml) });
+        return 'ACCEPTED';
+      } catch (error) {
+        return (error as Error).message;
+      }
+    };
+
+    it('the baseline fixture is ACCEPTED, so these guards are not rejecting everything', async () => {
+      expect(await rawValidate(signAssertion(buildResponse(), DEFAULT_ASSERTION_ID))).toBe(
+        'ACCEPTED'
+      );
+    });
+
+    it('(a) sibling assertion -> multiple-assertions guard', async () => {
+      expect(await rawValidate(xswSiblingAssertion())).toContain('multiple assertions');
+    });
+
+    it('(b) relocated signature -> enveloped-only guard', async () => {
+      expect(await rawValidate(xswRelocatedSignature())).toContain(
+        "Referenced node does not refer to it's parent element"
+      );
+    });
+
+    it('(c) duplicate ID -> ID-resolution guard', async () => {
+      expect(await rawValidate(xswDuplicateIdInExtensions())).toContain(
+        'ID cannot refer to more than one element'
+      );
+    });
+
+    it('(e) two signatures -> signature-count guard', async () => {
+      expect(await rawValidate(xswDoubleSignature())).toContain('Too many signatures');
+    });
   });
 
   it('TEST-003c rejects a duplicate-ID copy of the assertion in <samlp:Extensions>', async () => {
@@ -519,8 +630,11 @@ describe('REQ-008 assertion replay', () => {
     expect(generateTokens).toHaveBeenCalledTimes(1);
 
     // The second POST is stopped by the session gate first (the pending row is
-    // gone), which is the earlier of the two independent gates.
+    // gone), which is the earlier of the two independent gates. Asserting the
+    // specific reason matters even here: without it this test cannot tell a
+    // working replay gate from any other rejection path.
     await expect(processSAMLResponse(body, SSO_CONFIG_ID)).rejects.toThrow(UnauthorizedError);
+    expect(rejectionReason()).toBe('library_validation_failed');
     expect(generateTokens).toHaveBeenCalledTimes(1);
   });
 
@@ -821,7 +935,30 @@ describe('§B.16 tenant isolation', () => {
       post({ email: 'local@example.test', nameId: 'local@example.test' }),
       'user_not_sso_linked'
     );
-    expect(executed.some((s) => s.includes('UPDATE users SET sso_provider'))).toBe(false);
+    // The deleted behaviour was an UPDATE performed by an unauthenticated POST.
+    // Assert on ANY write to users, not just the old statement's exact text —
+    // matching the removed wording alone would be a tautology that stays green
+    // no matter what replaces it.
+    expect(executed.some((s) => s.includes('UPDATE users'))).toBe(false);
+    expect(users[0].sso_provider).toBeNull();
+    expect(users[0].sso_subject_id).toBeNull();
+  });
+
+  it('TEST-012c rejects an SSO account whose subject id is bound to a different subject', async () => {
+    users = [
+      {
+        id: 'sso-1',
+        email: DEFAULT_EMAIL,
+        name: 'Alice Example',
+        created_at: new Date(),
+        sso_provider: 'saml',
+        sso_subject_id: 'someone-else@example.test',
+      },
+    ];
+    teamMembers = [{ team_id: TEAM_ID, user_id: 'sso-1' }];
+
+    await expectRejection(post(), 'user_not_sso_linked');
+    expect(executed.some((s) => s.includes('UPDATE users'))).toBe(false);
   });
 });
 
@@ -881,6 +1018,281 @@ describe('LOG-001 log hygiene', () => {
     expect(consoleWarnSpy).not.toHaveBeenCalled();
     expect(consoleLogSpy).not.toHaveBeenCalled();
     expect(stderrSpy).not.toHaveBeenCalled();
+  });
+});
+
+// ============================================================================
+// Input screening — the rejection reasons reachable before any parsing
+// ============================================================================
+
+describe('input screening (§B.3.3, §B.9)', () => {
+  it('rejects a missing body', async () => {
+    await expectRejection('', 'response_missing');
+    await expect(
+      processSAMLResponse(undefined as unknown as string, SSO_CONFIG_ID)
+    ).rejects.toThrow(UnauthorizedError);
+    expect(rejectionReason()).toBe('response_missing');
+  });
+
+  it('rejects an oversized body BEFORE decoding or parsing it', async () => {
+    // Bounds XML-parser CPU and memory on unauthenticated input.
+    await expectRejection('A'.repeat(SAML_MAX_RESPONSE_BYTES + 1), 'response_too_large');
+    expect(executed.some((s) => s.includes('sso_sessions'))).toBe(false);
+  });
+
+  it('rejects an unknown SSO configuration', async () => {
+    configRow = null;
+    await expectRejection(post(), 'config_missing');
+  });
+
+  it('rejects a per-team disabled configuration', async () => {
+    configRow = defaultConfigRow({ enabled: false });
+    await expectRejection(post(), 'config_disabled');
+  });
+
+  it('rejects a body that is not XML at all', async () => {
+    await expectRejection(toPostBody('not xml at all'), 'library_validation_failed');
+  });
+
+  it('routes an unusable idp_certificate through the sanitized path (MED-7)', async () => {
+    // The SAML constructor throws for an absent trust anchor, and in dev
+    // errorHandler echoes err.message for non-AppError throws — so the
+    // constructor has to sit inside the guarded path rather than outside it.
+    configRow = defaultConfigRow({ idp_certificate: '' });
+    await expectRejection(post(), 'idp_cert_unusable');
+  });
+
+  it('a malformed-but-present certificate fails closed at validation, not at construction', async () => {
+    // Measured, not assumed: node-saml's constructor only rejects an ABSENT
+    // idpCert ("idpCert is required"). Certificate CONTENT is not parsed until
+    // signature verification, so this lands as library_validation_failed rather
+    // than idp_cert_unusable. Both are rejections and both are sanitized; the
+    // distinction is recorded so the reason codes are not misread as a
+    // certificate-shape validator that does not exist.
+    configRow = defaultConfigRow({ idp_certificate: 'not-a-certificate' });
+    await expectRejection(post(), 'library_validation_failed');
+  });
+});
+
+// ============================================================================
+// §B.7 — Destination is advisory, and its ABSENCE is deliberately allowed
+// ============================================================================
+
+describe('§B.7 Destination absence asymmetry', () => {
+  it('accepts an absent Destination while still requiring Recipient', async () => {
+    // Deliberate asymmetry: Destination is optional per SAML 2.0 Core on an
+    // unsigned envelope, so absent is allowed and present-and-wrong rejects.
+    // It looks like the REQ-003 fail-open bug and is not one — the authoritative
+    // binding check is Recipient, which is inside the signature and mandatory
+    // (proved by TEST-007c).
+    const signed = signAssertion(buildResponse(), DEFAULT_ASSERTION_ID);
+    const xml = signed.replace(` Destination="${SP_ACS_URL}"`, '');
+    expect(xml).not.toContain('Destination=');
+
+    const result = await processSAMLResponse(toPostBody(xml), SSO_CONFIG_ID);
+    expect(result.user.email).toBe(DEFAULT_EMAIL);
+  });
+});
+
+// ============================================================================
+// §B.8.5 — the request-binding branch the library masks
+// ============================================================================
+
+describe('§B.8.5 request binding (direct)', () => {
+  /**
+   * End to end, an SCD @InResponseTo naming a different session is caught by
+   * node-saml's own cross-check first (TEST-009e), so our defence-in-depth
+   * branch never runs there. §B.8.1 exists precisely because that library check
+   * is not reachable on every path, so the branch is exercised directly rather
+   * than left as untested code.
+   */
+  const ctx = (): SamlLogContext => ({
+    ssoConfigId: SSO_CONFIG_ID,
+    teamId: TEAM_ID,
+    correlation: 'none',
+  });
+  const withIrt = (values: string[]): VerifiedAssertion =>
+    ({ subjectInResponseTo: values }) as VerifiedAssertion;
+
+  it('accepts only the request id the flow actually consumed', () => {
+    expect(() => checkSubjectInResponseTo(withIrt(['_req-0001']), '_req-0001', ctx())).not.toThrow();
+  });
+
+  it('rejects a value that is not the consumed id, with inresponseto_mismatch', () => {
+    expect(() => checkSubjectInResponseTo(withIrt(['_req-0001']), '_other-live', ctx())).toThrow(
+      UnauthorizedError
+    );
+    expect(rejectionReason()).toBe('inresponseto_mismatch');
+  });
+
+  it('rejects an absent SCD @InResponseTo, with inresponseto_missing', () => {
+    expect(() => checkSubjectInResponseTo(withIrt([]), '_req-0001', ctx())).toThrow(
+      UnauthorizedError
+    );
+    expect(rejectionReason()).toBe('inresponseto_missing');
+  });
+
+  it('requires EVERY value to match, not merely one of them', () => {
+    expect(() =>
+      checkSubjectInResponseTo(withIrt(['_req-0001', '_other-live']), '_req-0001', ctx())
+    ).toThrow(UnauthorizedError);
+    expect(rejectionReason()).toBe('inresponseto_mismatch');
+  });
+});
+
+// ============================================================================
+// LOG-001 supplement — the silencing errorHandler must be load-bearing
+// ============================================================================
+
+describe('LOG-001 the DOMParser errorHandler is what suppresses xmldom', () => {
+  it('a default parser writes attacker text to console.error; parseResponseDom writes none', () => {
+    // Without this comparison the "zero console output" assertion elsewhere could
+    // pass simply because the parser was never reached, rather than because it
+    // was silenced — a false assurance, which is worse than no test.
+    const bad = malformedEntityBody(30);
+
+    // @xmldom/xmldom does NOT throw on this: it returns a partial document and
+    // writes one console.error line per bad reference. try/catch cannot
+    // intercept any of it, and the call count is attacker-controlled, which
+    // makes it a log-volume amplifier on an unauthenticated endpoint.
+    new DOMParser().parseFromString(bad, 'text/xml');
+    const defaultCalls = consoleErrorSpy.mock.calls.length;
+    consoleErrorSpy.mockClear();
+
+    // The same body through the silenced parser. It does NOT reject here — the
+    // root element really is <samlp:Response>, only its content is malformed —
+    // which is precisely why the error channel, not the return value, is what
+    // has to be closed.
+    parseResponseDom(bad, { ssoConfigId: SSO_CONFIG_ID, teamId: TEAM_ID, correlation: 'none' });
+    const silencedCalls = consoleErrorSpy.mock.calls.length;
+
+    expect(defaultCalls).toBeGreaterThanOrEqual(30);
+    expect(silencedCalls).toBe(0);
+  });
+
+  it('rejects a parsed document whose root element is not <Response>', () => {
+    const ctx: SamlLogContext = {
+      ssoConfigId: SSO_CONFIG_ID,
+      teamId: TEAM_ID,
+      correlation: 'none',
+    };
+    expect(() => parseResponseDom('<notaresponse/>', ctx)).toThrow(UnauthorizedError);
+    expect(rejectionReason()).toBe('response_root_invalid');
+  });
+
+  it('the DTD filter the spec mandates catches what the old one evaded', () => {
+    const evaded = withDoctype(signAssertion(buildResponse(), DEFAULT_ASSERTION_ID), DOCTYPE_CASINGS[1]);
+    // The issue-2 filter, retracted:
+    expect(evaded.includes('<!DOCTYPE')).toBe(false);
+    // The required one:
+    expect(/<!\s*doctype/i.test(evaded)).toBe(true);
+  });
+});
+
+// ============================================================================
+// TEST-014 supplement — the spoofing payload must really reach profile.issuer
+// ============================================================================
+
+describe('TEST-014 the profile write-through is real', () => {
+  it('node-saml populates profile.issuer from <Attribute Name="issuer"> while the structural read stays empty', async () => {
+    // Without this, TEST-014 could pass for the wrong reason — e.g. because the
+    // attribute never reached the profile at all — and would stop proving that
+    // reading `profile.issuer` is a bypass.
+    const store = new Map<string, string>([[DEFAULT_REQUEST_ID, new Date().toISOString()]]);
+    const saml = new SAML({
+      callbackUrl: SP_ACS_URL,
+      issuer: SP_ENTITY_ID,
+      idpCert: IDP_PUBLIC_KEY_PEM,
+      audience: SP_ENTITY_ID,
+      wantAssertionsSigned: true,
+      wantAuthnResponseSigned: false,
+      validateInResponseTo: ValidateInResponseTo.always,
+      requestIdExpirationPeriodMs: 600_000,
+      acceptedClockSkewMs: 60_000,
+      cacheProvider: {
+        saveAsync: async (k: string, val: string) => {
+          store.set(k, val);
+          return { value: val, createdAt: Date.now() };
+        },
+        getAsync: async (k: string) => store.get(k) ?? null,
+        removeAsync: async (k: string | null) => (k !== null && store.delete(k) ? k : null),
+      } as never,
+    });
+
+    const xml = signAssertion(
+      buildResponse({
+        issuer: null,
+        extraAttributes:
+          `<saml:Attribute Name="issuer"><saml:AttributeValue>${IDP_ENTITY_ID}` +
+          `</saml:AttributeValue></saml:Attribute>`,
+      }),
+      DEFAULT_ASSERTION_ID
+    );
+
+    const { profile } = await saml.validatePostResponseAsync({ SAMLResponse: toPostBody(xml) });
+    // Spoofed: an issuer check written against `profile` would read this and pass.
+    expect((profile as unknown as Record<string, unknown>).issuer).toBe(IDP_ENTITY_ID);
+    // Structural: the <Issuer> ELEMENT is genuinely absent, which is what
+    // readVerifiedAssertion sees and rejects on.
+    const parsed = (
+      profile as unknown as { getAssertion: () => { Assertion: { Issuer?: unknown } } }
+    ).getAssertion().Assertion;
+    expect(parsed.Issuer).toBeUndefined();
+  });
+});
+
+// ============================================================================
+// REQ-011 — the SP-initiated flow and its three audit columns survive
+// ============================================================================
+
+describe('REQ-011 initiateSAMLLogin', () => {
+  const config = (): SSOConfig => ({
+    id: SSO_CONFIG_ID,
+    teamId: TEAM_ID,
+    providerType: 'saml',
+    enabled: true,
+    idpEntityId: IDP_ENTITY_ID,
+    idpSsoUrl: 'https://idp.example.test/sso',
+    idpCertificate: IDP_PUBLIC_KEY_PEM,
+    idpMetadataUrl: null,
+    spEntityId: SP_ENTITY_ID,
+    spAcsUrl: SP_ACS_URL,
+    attributeMapping: {},
+    forceAuthn: false,
+    allowUnencryptedAssertion: false,
+    signAuthnRequest: true,
+    defaultRole: 'member',
+    autoProvisionUsers: true,
+    autoAddToTeam: true,
+  });
+
+  it('creates the pending row through the cache provider, preserving relay state, IP and user agent', async () => {
+    // node-saml's saveAsync(key, value) has no room for these three, so they
+    // travel on the provider's constructor. If that wiring were dropped, three
+    // columns of SSO audit data would vanish silently — this is the assertion
+    // that notices.
+    const { redirectUrl, requestId } = await initiateSAMLLogin(
+      config(),
+      'relay-abc',
+      '203.0.113.9',
+      'test-agent'
+    );
+
+    expect(requestId).toMatch(/^_[0-9a-f-]{36}$/);
+    expect(redirectUrl).toContain('https://idp.example.test/sso?SAMLRequest=');
+    expect(redirectUrl).toContain('RelayState=relay-abc');
+
+    const row = sessions.find((s) => s.request_id === requestId);
+    expect(row?.status).toBe('pending');
+    expect(row?.relay_state).toBe('relay-abc');
+    expect(row?.ip_address).toBe('203.0.113.9');
+    expect(row?.user_agent).toBe('test-agent');
+    expect(executed.filter((s) => s.includes('INSERT INTO sso_sessions'))).toHaveLength(1);
+  });
+
+  it('omits RelayState from the redirect when none was supplied', async () => {
+    const { redirectUrl } = await initiateSAMLLogin(config());
+    expect(redirectUrl).not.toContain('RelayState=');
   });
 });
 
