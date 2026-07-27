@@ -361,7 +361,7 @@ function generateApiKey(type: 'live' | 'test'): { key: string; hash: string } {
 ### 9.2 Incident Response Contacts
 
 ```
-Security Team: security@codehardener.dev
+Security Team: marc@bulletproofsoftware.ai
 Emergency: [To be defined]
 Bug Bounty: [To be defined]
 ```
