@@ -15,7 +15,7 @@ services:
       POSTGRES_USER: codehardener
       POSTGRES_PASSWORD: ${DB_PASSWORD:-codehardener_dev}
     ports:
-      - "${DB_PORT:-5432}:5432"
+      - "${BIND_ADDR:-127.0.0.1}:${DB_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./scripts/pg-create-databases.sh:/docker-entrypoint-initdb.d/00-create-dbs.sh
@@ -36,7 +36,7 @@ services:
     restart: unless-stopped
     command: redis-server --appendonly yes
     ports:
-      - "${REDIS_PORT:-6379}:6379"
+      - "${BIND_ADDR:-127.0.0.1}:${REDIS_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -83,7 +83,7 @@ services:
       LLM_THREATMODEL_MAX_TOKENS: ${LLM_THREATMODEL_MAX_TOKENS:-150000}
       LLM_SCAN_MAX_TOTAL_TOKENS: ${LLM_SCAN_MAX_TOTAL_TOKENS:-2000000}
     ports:
-      - "${BACKEND_PORT:-4000}:4000"
+      - "${BIND_ADDR:-127.0.0.1}:${BACKEND_PORT:-4000}:4000"
     volumes:
       - signing_keys:/data/keys
       - ${LOCAL_CODE_DIR:-~/Code}:/repos
@@ -174,7 +174,7 @@ services:
       - n8n_data:/home/node/.n8n
       - ./n8n-workflows:/home/node/workflows:ro
     ports:
-      - "${N8N_PORT:-5678}:5678"
+      - "${BIND_ADDR:-127.0.0.1}:${N8N_PORT:-5678}:5678"
     depends_on:
       postgres:
         condition: service_healthy
@@ -204,7 +204,7 @@ services:
       DD_ALLOWED_HOSTS: "*"
       DD_DEBUG: "False"
     ports:
-      - "${DEFECTDOJO_PORT:-8083}:8080"
+      - "${BIND_ADDR:-127.0.0.1}:${DEFECTDOJO_PORT:-8083}:8080"
     depends_on:
       postgres:
         condition: service_healthy
@@ -257,7 +257,7 @@ services:
       API_URL: http://backend:4000
       NEXT_PUBLIC_API_URL: http://localhost:${BACKEND_PORT:-4000}/api/v1
     ports:
-      - "${DASHBOARD_PORT:-3001}:3000"
+      - "${BIND_ADDR:-127.0.0.1}:${DASHBOARD_PORT:-3001}:3000"
     depends_on:
       - backend
     networks:
