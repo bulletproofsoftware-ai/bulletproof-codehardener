@@ -122,6 +122,11 @@ services:
       SCANNER_TIMEOUT_MS: 300000
       SCANNER_MAX_CONCURRENT: 5
       INTERNAL_API_KEY: ${INTERNAL_API_KEY:?Set INTERNAL_API_KEY in .env}
+      # The scanner runs NODE_ENV=production and shares the backend's fail-fast
+      # check on placeholder secrets, so it needs the real JWT_SECRET. Without
+      # this it falls back to the zod default in config/env.ts -- which IS the
+      # placeholder -- and the container restart-loops.
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
       # LLM Assurance (defending-code-reference-harness integration) — unset = stages skip with no_llm_api_key
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       LLM_THREATMODEL_MAX_TOKENS: ${LLM_THREATMODEL_MAX_TOKENS:-150000}
