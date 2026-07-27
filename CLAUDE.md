@@ -138,9 +138,21 @@ docker exec -i codehardener-postgres-1 psql -U codehardener -d codehardener < po
 
 ### Testing
 ```bash
-cd backend && npx vitest run      # Run all tests
+cd backend && npx vitest run      # Unit tests (mocked DB) - fast
+cd backend && npm run test:db     # Integration tests against a real PostgreSQL
 cd backend && npx tsc --noEmit    # Type check
 ```
+
+`npm run test:db` (`backend/tests/integration/*.itest.ts`, `vitest.integration.config.ts`)
+starts a throwaway PostgreSQL via `@testcontainers/postgresql`, applies `postgres/init.sql`
+and every migration in `postgres/migrations/`, and executes the SSO SQL against the real
+schema. It exists because the unit suite mocks `db/client.js` — the mock *is* the database,
+so SQL naming a column that does not exist still passes (that is how `sso_sessions.updated_at`
+shipped missing under 641 green unit tests). It never touches a running stack: the container
+is created per run, on a random port, and destroyed at teardown.
+
+Requires Docker. Without it the suite skips **loudly** with a banner naming the reason and
+exits 0; set `INTEGRATION_DB_REQUIRED=1` to make an unavailable database a hard failure.
 
 ### Key Conventions
 - Backend uses strict TypeScript (`noUnusedLocals`, `noUnusedParameters`)
