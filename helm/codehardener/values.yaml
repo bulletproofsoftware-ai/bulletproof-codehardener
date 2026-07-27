@@ -145,14 +145,18 @@ postgresql:
     # value is not a working credential, it is a broken deploy waiting to be
     # discovered in CrashLoopBackOff (CodeQL js/empty-password-in-configuration-file).
     #
-    # Supply them at install time:
-    #   --set postgresql.auth.postgresPassword=... --set postgresql.auth.password=...
-    # or from a values file kept outside the repo.
+    # Left unset, the subchart generates a random password into the
+    # `<release>-postgresql` Secret and this chart's workloads read it from
+    # there (see codehardener.datastoreEnv in templates/_helpers.tpl). A default
+    # `helm install` is therefore self-sufficient.
     #
-    # Note for whoever wires this to a pre-existing secret: setting
-    # postgresql.auth.existingSecret alone is NOT sufficient. templates/secrets.yaml
-    # builds `database-url` by interpolating .Values.postgresql.auth.password
-    # directly, so it has to be taught to read the same secret at the same time.
+    # To pin the credential instead, either:
+    #   --set postgresql.auth.postgresPassword=... --set postgresql.auth.password=...
+    # or point at a pre-existing Secret:
+    #   --set postgresql.auth.existingSecret=my-pg-secret
+    #   --set postgresql.auth.secretKeys.userPasswordKey=password
+    # Both are honoured — the templates resolve the Secret name and key through
+    # the subchart's own helpers rather than re-interpolating the password.
     username: codehardener
     database: codehardener
   primary:
@@ -177,12 +181,13 @@ redis:
   architecture: standalone
   auth:
     enabled: true
-    # As above: no empty-string default. Supply with
-    #   --set redis.auth.password=...
-    # templates/secrets.yaml interpolates this value into `redis-url` and
-    # `redis-password`, so leaving it unset yields `redis://:@host:6379` and a
-    # backend that cannot authenticate — the Bitnami subchart's own generated
-    # password is never read by this chart.
+    # As above: no empty-string default. Left unset, the subchart generates a
+    # random password into the `<release>-redis` Secret, and REDIS_URL /
+    # the KEDA TriggerAuthentication read it from there.
+    #
+    # To pin it:            --set redis.auth.password=...
+    # To reuse a Secret:    --set redis.auth.existingSecret=my-redis-secret
+    #                       --set redis.auth.existingSecretPasswordKey=redis-password
   master:
     resources:
       requests:
@@ -194,6 +199,30 @@ redis:
     persistence:
       enabled: true
       size: 5Gi
+
+# ============================================================================
+# External datastores (used only when the matching subchart is disabled)
+# ============================================================================
+# With postgresql.enabled=false / redis.enabled=false there is no subchart
+# Secret to read, so the host and a pre-existing Secret must be supplied here.
+# Rendering fails with an explicit message if they are missing, rather than
+# emitting a connection URL with no credential in it.
+externalDatabase:
+  host: ""
+  port: 5432
+  username: codehardener
+  database: codehardener
+  # Name of an existing Secret in the release namespace holding the password.
+  existingSecret: ""
+  existingSecretPasswordKey: password
+
+externalRedis:
+  host: ""
+  port: 6379
+  # Leave existingSecret empty only if the external Redis has no password;
+  # REDIS_URL is then rendered without credentials.
+  existingSecret: ""
+  existingSecretPasswordKey: redis-password
 
 # ============================================================================
 # Ingress

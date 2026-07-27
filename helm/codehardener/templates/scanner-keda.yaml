@@ -20,10 +20,13 @@ spec:
         {{- range $key, $value := .metadata }}
         {{ $key }}: {{ $value | quote }}
         {{- end }}
-        address: {{ $.Release.Name }}-redis-master:6379
+        address: {{ include "codehardener.redis.host" $ }}:{{ include "codehardener.redis.port" $ }}
+      {{- if include "codehardener.redis.authEnabled" $ }}
       authenticationRef:
         name: {{ include "codehardener.fullname" $ }}-redis-auth
+      {{- end }}
     {{- end }}
+{{- if include "codehardener.redis.authEnabled" . }}
 ---
 apiVersion: keda.sh/v1alpha1
 kind: TriggerAuthentication
@@ -32,6 +35,7 @@ metadata:
 spec:
   secretTargetRef:
     - parameter: password
-      name: codehardener-secrets
-      key: redis-password
+      name: {{ include "codehardener.redis.secretName" . }}
+      key: {{ include "codehardener.redis.passwordKey" . }}
+{{- end }}
 {{- end }}

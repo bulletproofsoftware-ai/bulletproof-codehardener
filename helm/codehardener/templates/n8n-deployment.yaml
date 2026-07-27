@@ -36,16 +36,20 @@ spec:
             - name: DB_TYPE
               value: postgresdb
             - name: DB_POSTGRESDB_HOST
-              value: {{ .Release.Name }}-postgresql
+              value: {{ include "codehardener.postgresql.host" . }}
+            - name: DB_POSTGRESDB_PORT
+              value: {{ include "codehardener.postgresql.port" . | quote }}
             - name: DB_POSTGRESDB_DATABASE
-              value: {{ .Values.postgresql.auth.database }}
+              value: {{ include "codehardener.postgresql.database" . }}
             - name: DB_POSTGRESDB_USER
-              value: {{ .Values.postgresql.auth.username }}
+              value: {{ include "codehardener.postgresql.username" . }}
+            # Was `key: redis-password` — n8n was handed the Redis password for
+            # its PostgreSQL connection. Reads the PostgreSQL Secret now.
             - name: DB_POSTGRESDB_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: codehardener-secrets
-                  key: redis-password
+                  name: {{ include "codehardener.postgresql.secretName" . }}
+                  key: {{ include "codehardener.postgresql.passwordKey" . }}
             - name: N8N_ENCRYPTION_KEY
               valueFrom:
                 secretKeyRef:

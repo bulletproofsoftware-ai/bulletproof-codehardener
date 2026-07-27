@@ -1,0 +1,3 @@
+# Subchart tarballs fetched by `helm dependency build`. Chart.lock is committed
+# and pins the exact versions, so these are reproducible build artifacts.
+charts/
